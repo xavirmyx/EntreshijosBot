@@ -17,7 +17,7 @@ app = Flask(__name__)
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
 
-# Función para manejar mensajes
+# Función para manejar mensajes con #solicito, /solicito o #peticion
 def handle_message(update, context):
     message = update.message
     chat_id = message.chat_id
@@ -29,8 +29,8 @@ def handle_message(update, context):
     # Obtiene la fecha y hora en formato local
     timestamp = datetime.now(pytz.timezone('UTC')).strftime('%d/%m/%Y %H:%M:%S')
 
-    # Verifica si el mensaje contiene #solicito o /solicito
-    if '#solicito' in message_text.lower() or message_text.lower().startswith('/solicito'):
+    # Verifica si el mensaje contiene #solicito, /solicito o #peticion
+    if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion']):
         # Mensaje para el grupo destino
         destino_message = (
             "📬 **Nueva solicitud recibida**  \n"
@@ -46,8 +46,11 @@ def handle_message(update, context):
         confirmacion_message = (
             "✅ **¡Solicitud enviada con éxito!**  \n"
             f"Hola {username}, tu solicitud ha sido registrada y enviada al equipo de Entreshijos. 📩  \n"
-            "Pronto recibirás una respuesta. ¡Gracias por confiar en nosotros! 🙌  \n"
+            f"👤 **ID:** {user_id}  \n"
+            f"🏠 **Grupo:** {chat_title}  \n"
             f"🕒 **Fecha y hora:** {timestamp}  \n"
+            f"📝 **Mensaje de la petición:** {message_text}  \n"
+            "¡Gracias por confiar en nosotros! 🙌  \n"
             "🌟 **Bot de Entreshijos**"
         )
         bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
@@ -56,14 +59,16 @@ def handle_message(update, context):
 message_handler = MessageHandler(Filters.text & ~Filters.command, handle_message)
 dispatcher.add_handler(message_handler)
 
-# Ruta para el webhook
-@app.route('/webhook', methods=['POST'])
-def webhook():
+# Ruta para el webhook con token dinámico
+@app.route('/webhook/<path:token>', methods=['POST'])
+def webhook(token):
+    if token != TOKEN:
+        return 'Invalid token', 403
     update = telegram.Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return 'ok', 200
 
-# Ruta raíz (opcional, para verificar que el servidor está vivo)
+# Ruta raíz (para verificar que el servidor está vivo)
 @app.route('/')
 def health_check():
     return "Bot de Entreshijos está activo!", 200
