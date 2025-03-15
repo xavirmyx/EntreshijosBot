@@ -3,20 +3,19 @@ import telegram
 from telegram.ext import Dispatcher, MessageHandler, Filters, CommandHandler
 from datetime import datetime
 import pytz
+import os
 
-# Configura tu token aquí
-TOKEN = '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY'  # Token de tu bot
-GROUP_DESTINO = '-1002641818457'  # ID del grupo destino
-
-# Configura la URL del webhook (ajusta esta URL según la que te dé Replit al correr el proyecto)
-WEBHOOK_URL = 'https://cac6e97c-cf96-418f-910d-801c340f9200-1fa26n9bvzsgx.janeway.replit.dev/webhook'
+# Configura tu token, grupo y URL del webhook usando variables de entorno
+TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
+GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 
 # Inicializa el bot y Flask
 bot = telegram.Bot(token=TOKEN)
 app = Flask(__name__)
 
-# Configura el Dispatcher
-dispatcher = Dispatcher(bot, None, workers=1)  # Usa al menos 1 worker
+# Configura el Dispatcher con al menos 1 worker
+dispatcher = Dispatcher(bot, None, workers=1)
 
 # Función para manejar mensajes
 def handle_message(update, context):
