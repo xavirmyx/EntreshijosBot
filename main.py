@@ -1,6 +1,6 @@
 from flask import Flask, request
 import telegram
-from telegram.ext import Dispatcher, MessageHandler, Filters, CommandHandler
+from telegram.ext import Dispatcher, MessageHandler, Filters
 from datetime import datetime
 import pytz
 import os
@@ -63,12 +63,11 @@ def webhook():
     dispatcher.process_update(update)
     return 'ok', 200
 
-# Ruta para configurar el webhook
+# Ruta raíz (opcional, para verificar que el servidor está vivo)
 @app.route('/')
-def set_webhook():
-    bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
-    return "Webhook set!", 200
+def health_check():
+    return "Bot de Entreshijos está activo!", 200
 
 if __name__ == '__main__':
-    # Inicia el servidor Flask
+    # Para desarrollo local, usa el puerto 5000
     app.run(host='0.0.0.0', port=5000)
