@@ -17,8 +17,20 @@ app = Flask(__name__)
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
 
+# Función para escapar caracteres especiales en Markdown
+def escape_markdown(text):
+    if not text:
+        return text
+    characters_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in characters_to_escape:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 # Función para manejar mensajes con #solicito, /solicito o #peticion
 def handle_message(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        return
+
     message = update.message
     chat_id = message.chat_id
     user_id = message.from_user.id
@@ -29,41 +41,52 @@ def handle_message(update, context):
     # Obtiene la fecha y hora en formato local
     timestamp = datetime.now(pytz.timezone('UTC')).strftime('%d/%m/%Y %H:%M:%S')
 
+    # Escapa caracteres especiales para Markdown
+    username_escaped = escape_markdown(username)
+    message_text_escaped = escape_markdown(message_text)
+    chat_title_escaped = escape_markdown(chat_title)
+
     # Verifica si el mensaje contiene #solicito, /solicito o #peticion
     if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion']):
         # Mensaje para el grupo destino
         destino_message = (
             "📬 **Nueva solicitud recibida**  \n"
-            f"👤 **Usuario:** {username} (ID: {user_id})  \n"
-            f"📝 **Mensaje:** {message_text}  \n"
-            f"🏠 **Grupo:** {chat_title}  \n"
+            f"👤 **Usuario:** {username_escaped} (ID: {user_id})  \n"
+            f"📝 **Mensaje:** {message_text_escaped}  \n"
+            f"🏠 **Grupo:** {chat_title_escaped}  \n"
             f"🕒 **Fecha y hora:** {timestamp}  \n"
             "🌟 **Bot de Entreshijos**"
         )
-        bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
+        try:
+            bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
+        except telegram.error.BadRequest as e:
+            # Si falla el parseo de Markdown, envía el mensaje como texto plano
+            bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode=None)
 
         # Mensaje de confirmación al usuario
         confirmacion_message = (
             "✅ **¡Solicitud enviada con éxito!**  \n"
-            f"Hola {username}, tu solicitud ha sido registrada y enviada al equipo de Entreshijos. 📩  \n"
+            f"Hola {username_escaped}, tu solicitud ha sido registrada y enviada al equipo de Entreshijos. 📩  \n"
             f"👤 **ID:** {user_id}  \n"
-            f"🏠 **Grupo:** {chat_title}  \n"
+            f"🏠 **Grupo:** {chat_title_escaped}  \n"
             f"🕒 **Fecha y hora:** {timestamp}  \n"
-            f"📝 **Mensaje de la petición:** {message_text}  \n"
+            f"📝 **Mensaje de la petición:** {message_text_escaped}  \n"
             "¡Gracias por confiar en nosotros! 🙌  \n"
             "🌟 **Bot de Entreshijos**"
         )
-        bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
+        try:
+            bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
+        except telegram.error.BadRequest as e:
+            # Si falla el parseo de Markdown, envía el mensaje como texto plano
+            bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode=None)
 
 # Añade el handler para mensajes
 message_handler = MessageHandler(Filters.text & ~Filters.command, handle_message)
 dispatcher.add_handler(message_handler)
 
-# Ruta para el webhook con token dinámico
-@app.route('/webhook/<path:token>', methods=['POST'])
-def webhook(token):
-    if token != TOKEN:
-        return 'Invalid token', 403
+# Ruta para el webhook
+@app.route('/webhook', methods=['POST'])
+def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
     dispatcher.process_update(update)
     return 'ok', 200
