@@ -75,8 +75,8 @@ def handle_message(update, context):
 
     timestamp = datetime.now(pytz.timezone('UTC')).strftime('%d/%m/%Y %H:%M:%S')
     username_escaped = escape_markdown(username, preserve_username=True)
-    message_text_escaped = escape_markdown(message_text)
-    chat_title_escaped = escape_markdown(chat_title)
+    chat_title_escaped = escape_markdown(chat_title, preserve_username=False)
+    message_text_escaped = escape_markdown(message_text, preserve_username=False)
 
     if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion', '/peticion']):
         logger.info(f"Solicitud recibida de {username} en {chat_title}: {message_text}")
@@ -114,7 +114,7 @@ def handle_message(update, context):
             f"👤 Usuario: {username_escaped} (ID: {user_id})  \n"
             f"     ticket Número - {ticket_number}  \n"
             f"     Petición {peticiones_por_usuario[user_id]['count']}/2  \n"
-            f"📝 Mensaje: {message_text}  \n"  # Texto plano
+            f"📝 Mensaje: {message_text}  \n"
             f"🏠 Grupo: {chat_title_escaped}  \n"
             f"🕒 Fecha y hora: {timestamp}  \n"
             "🌟 Bot de Entreshijos"
@@ -143,21 +143,29 @@ def handle_message(update, context):
             logger.error(f"Error al enviar al grupo destino con Markdown: {str(e)}")
 
         confirmacion_message = (
-            "✅ ¡Solicitud enviada con éxito! 🎉  \n"
-            f"Hola {username_escaped}, tu solicitud ha sido registrada con ticket #{ticket_number}. 📩  \n"
-            f"👤 ID: {user_id}  \n"
-            f"🏠 Grupo: {chat_title}  \n"  # Texto plano
-            f"🕒 Fecha y hora: {timestamp}  \n"
-            f"📝 Mensaje: {message_text}  \n"  # Texto plano
-            f"{random.choice(frases_agradecimiento)}  \n"
-            "🌟 Bot de Entreshijos"
+            "✅ *¡Solicitud enviada con éxito! 🎉*\n"
+            f"Hola {username_escaped}, tu solicitud ha sido registrada con ticket #{ticket_number}. 📩\n"
+            f"👤 *ID:* {user_id}\n"
+            f"🏠 *Grupo:* {chat_title_escaped}\n"
+            f"🕒 *Fecha y hora:* {timestamp}\n"
+            f"📝 *Mensaje:* {message_text_escaped}\n"
+            f"🌟 *¡Gracias por usar el bot! 🙌*\n\n"
+            "📌 *Instrucciones y comandos disponibles:*\n"
+            "✅ */ayuda* - Obtén una guía detallada para realizar solicitudes correctamente. 📖\n"
+            "✅ */estado [número de ticket]* - Consulta el estado de tu solicitud (ejemplo: /estado {ticket_number}). ⏳\n"
+            "⚠️ *Recuerda tener paciencia*, algunas solicitudes pueden tardar más en ser gestionadas. ⏰\n"
+            "🙏 *Sé agradecido* y muestra tu aprecio al equipo cuando sea gestionada tu solicitud. 💖\n"
+            "📢 *Para reportes, consultas o denuncias*, usa *@admin* para atención personalizada (úsalo con moderación). 🛡️\n"
+            "📜 */rules* - Revisa las normas del grupo para una experiencia armoniosa. ⚖️\n"
+            "🌟 *Equipo de Entreshijos - ¡Estamos aquí para ayudarte!*"
         )
         try:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
             logger.info(f"Confirmación enviada a {username} en {chat_id}")
         except telegram.error.BadRequest as e:
-            bot.send_message(chat_id=chat_id, text=confirmacion_message.replace('*', '').replace('**', ''))
-            logger.error(f"Error al enviar confirmación con Markdown: {str(e)}")
+            plain_text = confirmacion_message.replace('*', '').replace('**', '')
+            bot.send_message(chat_id=chat_id, text=plain_text)
+            logger.error(f"Error al enviar confirmación con Markdown: {str(e)} - Enviado en texto plano")
 
 # Función para manejar el comando /eliminar [ticket] [estado]
 def handle_eliminar(update, context):
@@ -344,22 +352,22 @@ def handle_menu(update, context):
         return
 
     menu_message = (
-        "📋 **Menú de comandos** 🌟\n"
+        "📋 *Menú de comandos* 🌟\n"
         "Aquí tienes todos los comandos disponibles:\n"
-        "🔧 **Comandos para usuarios:**\n"
-        "✅ **/solicito** o **#solicito** - Enviar una solicitud (máx. 2 por día).\n"
-        "✅ **/peticion** o **#peticion** - Enviar una solicitud (máx. 2 por día).\n"
-        "✅ **/ayuda** - Ver esta guía.\n"
-        "✅ **/estado [ticket]** - Consultar el estado de una solicitud (ejemplo: /estado 150).\n"
-        "🔧 **Comandos para administradores:**\n"
-        "✅ **/eliminar [ticket] [estado]** - Elimina una solicitud y notifica al usuario (ejemplo: /eliminar 150 aprobada).\n"
-        "✅ **/subido [ticket]** - Marca una solicitud como subida y notifica al usuario.\n"
-        "✅ **/denegado [ticket]** - Marca una solicitud como denegada y notifica al usuario.\n"
-        "✅ **/notificar [username] [mensaje]** - Envía un mensaje personalizado a un usuario (ejemplo: /notificar @MRS_K98 Tu solicitud está lista).\n"
+        "🔧 *Comandos para usuarios:*\n"
+        "✅ */solicito* o *#solicito* - Enviar una solicitud (máx. 2 por día).\n"
+        "✅ */peticion* o *#peticion* - Enviar una solicitud (máx. 2 por día).\n"
+        "✅ */ayuda* - Ver esta guía.\n"
+        "✅ */estado [ticket]* - Consultar el estado de una solicitud (ejemplo: /estado 150).\n"
+        "🔧 *Comandos para administradores:*\n"
+        "✅ */eliminar [ticket] [estado]* - Elimina una solicitud y notifica al usuario (ejemplo: /eliminar 150 aprobada).\n"
+        "✅ */subido [ticket]* - Marca una solicitud como subida y notifica al usuario.\n"
+        "✅ */denegado [ticket]* - Marca una solicitud como denegada y notifica al usuario.\n"
+        "✅ */notificar [username] [mensaje]* - Envía un mensaje personalizado a un usuario (ejemplo: /notificar @MRS_K98 Tu solicitud está lista).\n"
         "📌 Estados válidos: aprobada, denegada, eliminada.\n"
-        "📋 **/pendientes** - Ver lista de solicitudes pendientes.\n"
-        "🔴 **/off** - Desactiva la recepción de solicitudes.\n"
-        "🟢 **/on** - Reactiva la recepción de solicitudes.\n"
+        "📋 */pendientes* - Ver lista de solicitudes pendientes.\n"
+        "🔴 */off* - Desactiva la recepción de solicitudes.\n"
+        "🟢 */on* - Reactiva la recepción de solicitudes.\n"
         "🌟 Bot de Entreshijos"
     )
     try:
@@ -387,7 +395,7 @@ def handle_off(update, context):
     aceptar_solicitudes = False
 
     off_message = (
-        "🚫 ¡Atención usuarios! 🌟\n"
+        "🚫 *¡Atención usuarios!* 🌟\n"
         "De momento no se aceptan solicitudes hasta nuevo aviso. Equipo de administración.\n"
         "Disculpen las molestias. 🙏"
     )
@@ -419,7 +427,7 @@ def handle_on(update, context):
     aceptar_solicitudes = True
 
     on_message = (
-        "🎉 ¡Buenas noticias! 🌟\n"
+        "🎉 *¡Buenas noticias!* 🌟\n"
         "Ya se pueden enviar solicitudes con /solicito, #solicito, /peticion o #peticion.\n"
         "Máximo 2 por día por usuario cada 24 horas. Equipo de Entreshijos. 🙌"
     )
@@ -452,7 +460,7 @@ def handle_pendientes(update, context):
     if not pendientes:
         respuesta = "📋 No hay solicitudes pendientes. 🌟"
     else:
-        respuesta = "📋 Solicitudes pendientes 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
+        respuesta = "📋 *Solicitudes pendientes* 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
     try:
         bot.send_message(chat_id=chat_id, text=respuesta)
         logger.info("Lista de pendientes enviada al grupo destino")
@@ -471,10 +479,10 @@ def handle_ayuda(update, context):
     username = f"@{message.from_user.username}" if message.from_user.username else "Usuario"
 
     ayuda_message = (
-        "📖 Guía de EntreshijosBot 🌟\n"
-        "Usa /solicito, #solicito, /peticion o #peticion para enviar solicitudes (máx. 2 por día).\n"
-        "📋 Consulta el estado con /estado [ticket].\n"
-        "❓ Escribe /ayuda para esta guía.\n"
+        "📖 *Guía de EntreshijosBot* 🌟\n"
+        "Usa */solicito* o *#solicito* para enviar solicitudes (máx. 2 por día).\n"
+        "📋 Consulta el estado con */estado [ticket]* (ejemplo: /estado 150).\n"
+        "❓ Escribe */ayuda* para esta guía.\n"
         f"¡Gracias {username} por usar el bot! 🙌"
     )
     try:
@@ -509,14 +517,14 @@ def handle_estado(update, context):
         peticion_info = peticiones_registradas[ticket_number]
         timestamp = peticion_info["timestamp"].strftime('%d/%m/%Y %H:%M:%S')
         estado_message = (
-            f"📋 Estado de tu solicitud, {username} 🌟\n"
+            f"📋 *Estado de tu solicitud*, {username} 🌟\n"
             f"Ticket #{ticket_number}: {peticion_info['message_text']}\n"
             f"Estado: Pendiente ⏳\n"
             f"🕒 Enviada: {timestamp}"
         )
     else:
         estado_message = (
-            f"📋 Estado de tu solicitud, {username} 🌟\n"
+            f"📋 *Estado de tu solicitud*, {username} 🌟\n"
             f"Ticket #{ticket_number}: Ya fue gestionada (aprobada, denegada o eliminada). ✅"
         )
     try:
