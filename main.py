@@ -88,9 +88,8 @@ def handle_message(update, context):
             logger.info(f"Solicitudes desactivadas, notificado a {username}")
             return
 
-        if user_id in admin_ids:
-            pass
-        else:
+        # Los administradores no tienen límite de solicitudes
+        if user_id not in admin_ids:  # Solo aplica límite a no administradores
             if user_id not in peticiones_por_usuario:
                 peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
             peticiones_por_usuario[user_id]["count"] += 1
@@ -104,6 +103,11 @@ def handle_message(update, context):
                 bot.send_message(chat_id=chat_id, text=warn_message)
                 logger.info(f"Límite excedido por {username}, advertencia enviada: {warn_message}")
                 return
+        else:
+            # Para administradores, inicializamos si no están en el diccionario, pero no aplicamos límite
+            if user_id not in peticiones_por_usuario:
+                peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
+            peticiones_por_usuario[user_id]["count"] += 1  # Contamos, pero no limitamos
 
         global ticket_counter
         ticket_counter += 1
@@ -113,7 +117,7 @@ def handle_message(update, context):
             "📬 Nueva solicitud recibida  \n"
             f"👤 Usuario: {username_escaped} (ID: {user_id})  \n"
             f"     ticket Número - {ticket_number}  \n"
-            f"     Petición {peticiones_por_usuario[user_id]['count']}/2  \n"
+            f"     Petición {peticiones_por_usuario[user_id]['count']}/{2 if user_id not in admin_ids else '∞'}  \n"
             f"📝 Mensaje: {message_text}  \n"
             f"🏠 Grupo: {chat_title_escaped}  \n"
             f"🕒 Fecha y hora: {timestamp}  \n"
@@ -337,7 +341,7 @@ def handle_denegado(update, context):
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {str(e)}. 🌟")
         logger.error(f"Error al notificar a {username_escaped}: {str(e)}")
 
-# Función para manejar el comando /menu (solo en grupo destino)
+# Función para manejar el comando /menu (solo en grupo destino) - ACTUALIZADO
 def handle_menu(update, context):
     if not update.message:
         logger.warning("Mensaje /menu recibido es None")
@@ -359,11 +363,21 @@ def handle_menu(update, context):
         "✅ */peticion* o *#peticion* - Enviar una solicitud (máx. 2 por día).\n"
         "✅ */ayuda* - Ver esta guía.\n"
         "✅ */estado [ticket]* - Consultar el estado de una solicitud (ejemplo: /estado 150).\n"
+        "✅ */cancel [ticket]* - Cancelar una solicitud pendiente (ejemplo: /cancel 150).\n"
+        "✅ */check* - Verificar cuántas solicitudes te quedan hoy.\n"
+        "✅ */random* - Obtener una frase aleatoria de agradecimiento.\n"
+        "✅ */joke* - Recibir un chiste corto para alegrar el día.\n"
         "🔧 *Comandos para administradores:*\n"
         "✅ */eliminar [ticket] [estado]* - Elimina una solicitud y notifica al usuario (ejemplo: /eliminar 150 aprobada).\n"
         "✅ */subido [ticket]* - Marca una solicitud como subida y notifica al usuario.\n"
         "✅ */denegado [ticket]* - Marca una solicitud como denegada y notifica al usuario.\n"
         "✅ */notificar [username] [mensaje]* - Envía un mensaje personalizado a un usuario (ejemplo: /notificar @MRS_K98 Tu solicitud está lista).\n"
+        "✅ */mensaje [texto]* - Envía un mensaje masivo a todos los grupos activos (ejemplo: /mensaje Hola a todos).\n"
+        "✅ */clear* - Limpia el registro de mensajes procesados.\n"
+        "✅ */stats* - Muestra estadísticas básicas del bot.\n"
+        "✅ */ping* - Verifica si el bot está activo.\n"
+        "✅ */groups* - Lista los IDs de los grupos activos.\n"
+        "✅ */count* - Cuenta los usuarios únicos que han enviado solicitudes.\n"
         "📌 Estados válidos: aprobada, denegada, eliminada.\n"
         "📋 */pendientes* - Ver lista de solicitudes pendientes.\n"
         "🔴 */off* - Desactiva la recepción de solicitudes.\n"
@@ -602,6 +616,10 @@ dispatcher.add_handler(off_handler)
 
 on_handler = CommandHandler('on', handle_on)
 dispatcher.add_handler(on_handler)
+
+# Importar los comandos adicionales desde extra_commands.py
+from extra_commands import add_extra_handlers
+add_extra_handlers(dispatcher)
 
 # Ruta para el webhook
 @app.route('/webhook', methods=['POST'])
