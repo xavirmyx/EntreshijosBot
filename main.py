@@ -5,11 +5,16 @@ from datetime import datetime
 import pytz
 import os
 import random
+import logging  # Añadimos logging para los logs en Render
 
 # Configura tu token, grupo y URL del webhook usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
+
+# Configura el logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # Inicializa el bot y Flask
 bot = telegram.Bot(token=TOKEN)
@@ -50,6 +55,7 @@ def escape_markdown(text):
 # Función para manejar mensajes con #solicito, /solicito, #peticion o /peticion
 def handle_message(update, context):
     if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje recibido es None")
         return
 
     message = update.message
@@ -61,6 +67,7 @@ def handle_message(update, context):
 
     # Registra el grupo activo
     grupos_activos.add(chat_id)
+    logger.info(f"Grupo activo registrado: {chat_id}")
 
     # Obtiene la fecha y hora en formato local
     timestamp = datetime.now(pytz.timezone('UTC')).strftime('%d/%m/%Y %H:%M:%S')
@@ -72,11 +79,13 @@ def handle_message(update, context):
 
     # Verifica si el mensaje contiene #solicito, /solicito, #peticion o /peticion
     if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion', '/peticion']):
-        if not aceptar_solicitudes and user_id not in admin_ids:
+        logger.info(f"Solicitud recibida de {username_escaped} en {chat_title_escaped}: {message_text_escaped}")
+        if not aceptar_solicitudes:
             notificacion = (
                 f"🚫 {username_escaped}, de momento no se aceptan solicitudes. Equipo de administración. 🌟"
             )
             bot.send_message(chat_id=chat_id, text=notificacion)
+            logger.info(f"Solicitudes desactivadas, notificado a {username_escaped}")
             return
 
         # Excepción para administradores
@@ -94,8 +103,9 @@ def handle_message(update, context):
                     f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta de nuevo mañana. 🌟"
                 )
                 bot.send_message(chat_id=chat_id, text=limite_message)
-                warn_message = f"@GroupHelpBot /warn {username_escaped} Peticiones diarias superadas"
+                warn_message = f"/warn {username_escaped} Limite de peticiones diarias superadas"
                 bot.send_message(chat_id=chat_id, text=warn_message)
+                logger.info(f"Límite excedido por {username_escaped}, advertencia enviada: {warn_message}")
                 return
 
         # Incrementa el contador de tickets global
@@ -117,14 +127,16 @@ def handle_message(update, context):
         )
         try:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
-            # Almacena información con timestamp
+            # Almacena información con timestamp y chat_title
             peticiones_registradas[ticket_number] = {
                 "chat_id": chat_id,
                 "username": username,
                 "message_text": message_text,
                 "message_id": sent_message.message_id,
-                "timestamp": datetime.now(pytz.timezone('UTC'))
+                "timestamp": datetime.now(pytz.timezone('UTC')),
+                "chat_title": chat_title
             }
+            logger.info(f"Solicitud #{ticket_number} enviada al grupo destino")
         except telegram.error.BadRequest as e:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode=None)
             peticiones_registradas[ticket_number] = {
@@ -132,10 +144,12 @@ def handle_message(update, context):
                 "username": username,
                 "message_text": message_text,
                 "message_id": sent_message.message_id,
-                "timestamp": datetime.now(pytz.timezone('UTC'))
+                "timestamp": datetime.now(pytz.timezone('UTC')),
+                "chat_title": chat_title
             }
+            logger.error(f"Error al enviar al grupo destino con Markdown: {e}")
 
-        # Mensaje de confirmación al usuario
+        # Mensaje de confirmación al usuario (solo una vez)
         agradecimiento = random.choice(frases_agradecimiento)
         confirmacion_message = (
             "✅ ¡Solicitud enviada con éxito! 🎉  \n"
@@ -149,13 +163,16 @@ def handle_message(update, context):
         )
         try:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
-            bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)  # Sticker de confirmación
+            bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
+            logger.info(f"Confirmación enviada a {username_escaped} en {chat_id}")
         except telegram.error.BadRequest as e:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode=None)
+            logger.error(f"Error al enviar confirmación con Markdown: {e}")
 
 # Función para manejar el comando /eliminar [ticket] [estado]
 def handle_eliminar(update, context):
     if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /eliminar recibido es None")
         return
 
     message = update.message
@@ -164,6 +181,7 @@ def handle_eliminar(update, context):
     # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /eliminar fuera del grupo destino: {chat_id}")
         return
 
     # Obtiene los argumentos del comando
@@ -182,6 +200,7 @@ def handle_eliminar(update, context):
     # Verifica si el ticket existe
     if ticket_number not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
+        logger.info(f"Ticket #{ticket_number} no encontrado para /eliminar")
         return
 
     # Obtiene la información almacenada
@@ -199,8 +218,10 @@ def handle_eliminar(update, context):
     try:
         bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
         bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} eliminada ({estado}). 🌟")
+        logger.info(f"Solicitud #{ticket_number} eliminada del grupo destino")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {e}. Notificando de todos modos. 🌟")
+        logger.error(f"Error al eliminar mensaje #{ticket_number}: {e}")
 
     # Notifica al usuario en su grupo
     if estado == "aprobada":
@@ -222,40 +243,263 @@ def handle_eliminar(update, context):
 
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
-        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_ON)  # Sticker de confirmación
+        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_ON)
+        logger.info(f"Notificación de /eliminar enviada a {username_escaped} en {user_chat_id}")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
+        logger.error(f"Error al notificar a {username_escaped}: {e}")
 
     # Elimina la información del diccionario
     del peticiones_registradas[ticket_number]
 
-# Función para manejar el comando /pendientes (solo para administradores)
-def handle_pendientes(update, context):
+# Función para manejar el comando /subido [ticket]
+def handle_subido(update, context):
     if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /subido recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
 
-    # Solo permitir este comando en el grupo destino y para administradores
-    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /subido fuera del grupo destino: {chat_id}")
+        return
+
+    # Obtiene el argumento del comando
+    args = context.args
+    if len(args) != 1:
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /subido [ticket]. Ejemplo: /subido 150 🌟")
+        return
+
+    try:
+        ticket_number = int(args[0])
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número válido. Ejemplo: /subido 150 🌟")
+        return
+
+    # Verifica si el ticket existe
+    if ticket_number not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
+        logger.info(f"Ticket #{ticket_number} no encontrado para /subido")
+        return
+
+    # Obtiene la información almacenada
+    peticion_info = peticiones_registradas[ticket_number]
+    user_chat_id = peticion_info["chat_id"]
+    username = peticion_info["username"]
+    message_text = peticion_info["message_text"]
+
+    # Escapa caracteres para Markdown
+    username_escaped = escape_markdown(username)
+    message_text_escaped = escape_markdown(message_text)
+
+    # Notifica al usuario en su grupo
+    notificacion = (
+        f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido subida. ¡Gracias! 🎉"
+    )
+    try:
+        bot.send_message(chat_id=user_chat_id, text=notificacion)
+        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_ON)
+        bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} marcada como subida. 🌟")
+        logger.info(f"Notificación de /subido enviada a {username_escaped} en {user_chat_id}")
+    except telegram.error.TelegramError as e:
+        bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
+        logger.error(f"Error al notificar a {username_escaped}: {e}")
+
+# Función para manejar el comando /denegado [ticket]
+def handle_denegado(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /denegado recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /denegado fuera del grupo destino: {chat_id}")
+        return
+
+    # Obtiene el argumento del comando
+    args = context.args
+    if len(args) != 1:
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /denegado [ticket]. Ejemplo: /denegado 150 🌟")
+        return
+
+    try:
+        ticket_number = int(args[0])
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número válido. Ejemplo: /denegado 150 🌟")
+        return
+
+    # Verifica si el ticket existe
+    if ticket_number not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
+        logger.info(f"Ticket #{ticket_number} no encontrado para /denegado")
+        return
+
+    # Obtiene la información almacenada
+    peticion_info = peticiones_registradas[ticket_number]
+    user_chat_id = peticion_info["chat_id"]
+    username = peticion_info["username"]
+    message_text = peticion_info["message_text"]
+
+    # Escapa caracteres para Markdown
+    username_escaped = escape_markdown(username)
+    message_text_escaped = escape_markdown(message_text)
+
+    # Notifica al usuario en su grupo
+    notificacion = (
+        f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
+    )
+    try:
+        bot.send_message(chat_id=user_chat_id, text=notificacion)
+        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_OFF)
+        bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} marcada como denegada. 🌟")
+        logger.info(f"Notificación de /denegado enviada a {username_escaped} en {user_chat_id}")
+    except telegram.error.TelegramError as e:
+        bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
+        logger.error(f"Error al notificar a {username_escaped}: {e}")
+
+# Función para manejar el comando /menu (solo en grupo destino)
+def handle_menu(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /menu recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /menu fuera del grupo destino: {chat_id}")
+        return
+
+    menu_message = (
+        "📋 **Menú de comandos para administradores** 🌟\n"
+        "Aquí tienes los comandos disponibles:\n"
+        "✅ **/eliminar [ticket] [estado]** - Elimina una solicitud y notifica al usuario (ejemplo: /eliminar 150 aprobada).\n"
+        "✅ **/subido [ticket]** - Marca una solicitud como subida y notifica al usuario.\n"
+        "✅ **/denegado [ticket]** - Marca una solicitud como denegada y notifica al usuario.\n"
+        "📌 Estados válidos: aprobada, denegada, eliminada.\n"
+        "📋 **/pendientes** - Ver lista de solicitudes pendientes.\n"
+        "🔴 **/off** - Desactiva la recepción de solicitudes.\n"
+        "🟢 **/on** - Reactiva la recepción de solicitudes.\n"
+        "🌟 Bot de Entreshijos"
+    )
+    try:
+        bot.send_message(chat_id=chat_id, text=menu_message, parse_mode='Markdown')
+        logger.info("Menú enviado al grupo destino")
+    except telegram.error.BadRequest as e:
+        bot.send_message(chat_id=chat_id, text=menu_message, parse_mode=None)
+        logger.error(f"Error al enviar menú con Markdown: {e}")
+
+# Función para manejar el comando /off (solo en grupo destino)
+def handle_off(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /off recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /off fuera del grupo destino: {chat_id}")
+        return
+
+    global aceptar_solicitudes
+    aceptar_solicitudes = False
+
+    # Notificación a todos los grupos
+    off_message = (
+        "🚫 ¡Atención usuarios! 🌟\n"
+        "De momento no se aceptan solicitudes hasta nuevo aviso. Equipo de administración.\n"
+        "Disculpen las molestias. 🙏"
+    )
+    for grupo in grupos_activos:
+        try:
+            bot.send_message(chat_id=grupo, text=off_message)
+            bot.send_sticker(chat_id=grupo, sticker=STICKER_OFF)
+            logger.info(f"Notificación /off enviada al grupo {grupo}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al notificar /off al grupo {grupo}: {e}")
+
+    bot.send_message(chat_id=chat_id, text="🔴 Bot desactivado para nuevas solicitudes. 🌟")
+    logger.info("Bot desactivado para nuevas solicitudes")
+
+# Función para manejar el comando /on (solo en grupo destino)
+def handle_on(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /on recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /on fuera del grupo destino: {chat_id}")
+        return
+
+    global aceptar_solicitudes
+    aceptar_solicitudes = True
+
+    # Notificación a todos los grupos
+    on_message = (
+        "🎉 ¡Buenas noticias! 🌟\n"
+        "Ya se pueden enviar solicitudes con /solicito, #solicito, /peticion o #peticion.\n"
+        "Máximo 2 por día por usuario cada 24 horas. Equipo de Entreshijos. 🙌"
+    )
+    for grupo in grupos_activos:
+        try:
+            bot.send_message(chat_id=grupo, text=on_message)
+            bot.send_sticker(chat_id=grupo, sticker=STICKER_ON)
+            logger.info(f"Notificación /on enviada al grupo {grupo}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al notificar /on al grupo {grupo}: {e}")
+
+    bot.send_message(chat_id=chat_id, text="🟢 Bot reactivado para recibir solicitudes. 🌟")
+    logger.info("Bot reactivado para nuevas solicitudes")
+
+# Función para manejar el comando /pendientes (solo en grupo destino)
+def handle_pendientes(update, context):
+    if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /pendientes recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    # Solo permitir este comando en el grupo destino
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        logger.info(f"Intento de /pendientes fuera del grupo destino: {chat_id}")
         return
 
     pendientes = [f"{i}. Ticket #{k} - {v['username']}: \"{escape_markdown(v['message_text'])}\" (Grupo: {escape_markdown(v.get('chat_title', 'Desconocido'))})" 
-                  for k, v in peticiones_registradas.items()]
+                  for i, (k, v) in enumerate(peticiones_registradas.items(), 1)]
     if not pendientes:
         respuesta = "📋 No hay solicitudes pendientes. 🌟"
     else:
         respuesta = "📋 Solicitudes pendientes 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
     try:
         bot.send_message(chat_id=chat_id, text=respuesta, parse_mode='Markdown')
+        logger.info("Lista de pendientes enviada al grupo destino")
     except telegram.error.BadRequest as e:
         bot.send_message(chat_id=chat_id, text=respuesta, parse_mode=None)
+        logger.error(f"Error al enviar pendientes con Markdown: {e}")
 
 # Función para manejar el comando /ayuda
 def handle_ayuda(update, context):
     if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /ayuda recibido es None")
         return
 
     message = update.message
@@ -271,13 +515,16 @@ def handle_ayuda(update, context):
     )
     try:
         bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode='Markdown')
-        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)  # Sticker de ayuda
+        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
+        logger.info(f"Ayuda enviada a {username} en {chat_id}")
     except telegram.error.BadRequest as e:
         bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode=None)
+        logger.error(f"Error al enviar ayuda con Markdown: {e}")
 
 # Función para manejar el comando /estado
 def handle_estado(update, context):
     if not update.message:  # Verifica que update.message no sea None
+        logger.warning("Mensaje /estado recibido es None")
         return
 
     message = update.message
@@ -311,73 +558,11 @@ def handle_estado(update, context):
         )
     try:
         bot.send_message(chat_id=chat_id, text=estado_message, parse_mode='Markdown')
-        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)  # Sticker de estado
+        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
+        logger.info(f"Estado de ticket #{ticket_number} enviado a {username} en {chat_id}")
     except telegram.error.BadRequest as e:
         bot.send_message(chat_id=chat_id, text=estado_message, parse_mode=None)
-
-# Función para manejar el comando /off (solo para administradores)
-def handle_off(update, context):
-    if not update.message:  # Verifica que update.message no sea None
-        return
-
-    message = update.message
-    chat_id = message.chat_id
-    user_id = message.from_user.id
-
-    # Solo permitir este comando para administradores
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
-        return
-
-    global aceptar_solicitudes
-    aceptar_solicitudes = False
-
-    # Notificación a todos los grupos
-    off_message = (
-        "🚫 ¡Atención usuarios! 🌟\n"
-        "De momento no se aceptan solicitudes hasta nuevo aviso. Equipo de administración.\n"
-        "Disculpen las molestias. 🙏"
-    )
-    for grupo in grupos_activos:
-        try:
-            bot.send_message(chat_id=grupo, text=off_message)
-            bot.send_sticker(chat_id=grupo, sticker=STICKER_OFF)  # Sticker de pausa
-        except telegram.error.TelegramError as e:
-            continue
-
-    bot.send_message(chat_id=chat_id, text="🔴 Bot desactivado para nuevas solicitudes. 🌟")
-
-# Función para manejar el comando /on (solo para administradores)
-def handle_on(update, context):
-    if not update.message:  # Verifica que update.message no sea None
-        return
-
-    message = update.message
-    chat_id = message.chat_id
-    user_id = message.from_user.id
-
-    # Solo permitir este comando para administradores
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
-        return
-
-    global aceptar_solicitudes
-    aceptar_solicitudes = True
-
-    # Notificación a todos los grupos
-    on_message = (
-        "🎉 ¡Buenas noticias! 🌟\n"
-        "Ya se pueden enviar solicitudes con /solicito, #solicito, /peticion o #peticion.\n"
-        "Máximo 2 por día por usuario cada 24 horas. Equipo de Entreshijos. 🙌"
-    )
-    for grupo in grupos_activos:
-        try:
-            bot.send_message(chat_id=grupo, text=on_message)
-            bot.send_sticker(chat_id=grupo, sticker=STICKER_ON)  # Sticker de reactivación
-        except telegram.error.TelegramError as e:
-            continue
-
-    bot.send_message(chat_id=chat_id, text="🟢 Bot reactivado para recibir solicitudes. 🌟")
+        logger.error(f"Error al enviar estado con Markdown: {e}")
 
 # Añade los handlers
 message_handler = MessageHandler(Filters.text & ~Filters.command, handle_message)
@@ -385,6 +570,15 @@ dispatcher.add_handler(message_handler)
 
 eliminar_handler = CommandHandler('eliminar', handle_eliminar)
 dispatcher.add_handler(eliminar_handler)
+
+subido_handler = CommandHandler('subido', handle_subido)
+dispatcher.add_handler(subido_handler)
+
+denegado_handler = CommandHandler('denegado', handle_denegado)
+dispatcher.add_handler(denegado_handler)
+
+menu_handler = CommandHandler('menu', handle_menu)
+dispatcher.add_handler(menu_handler)
 
 pendientes_handler = CommandHandler('pendientes', handle_pendientes)
 dispatcher.add_handler(pendientes_handler)
@@ -404,15 +598,21 @@ dispatcher.add_handler(on_handler)
 # Ruta para el webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = telegram.Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'ok', 200
+    try:
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
+        dispatcher.process_update(update)
+        logger.info("Webhook procesado correctamente")
+        return 'ok', 200
+    except Exception as e:
+        logger.error(f"Error en el webhook: {e}")
+        return 'error', 500
 
 # Ruta raíz (para verificar que el servidor está vivo)
 @app.route('/')
 def health_check():
+    logger.info("Health check solicitado")
     return "Bot de Entreshijos está activo! 🌟", 200
 
 if __name__ == '__main__':
-    # Para desarrollo local, usa el puerto 5000
+    logger.info("Iniciando el bot en modo local")
     app.run(host='0.0.0.0', port=5000)
