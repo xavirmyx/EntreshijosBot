@@ -455,14 +455,14 @@ def handle_pendientes(update, context):
         logger.info(f"Intento de /pendientes fuera del grupo destino: {chat_id}")
         return
 
-    pendientes = [f"{i}. Ticket #{k} - {v['username']}: {v['message_text']} (Grupo: {v.get('chat_title', 'Desconocido')})"
+    pendientes = [f"{i}. 🎫 Ticket #{k} - {v['username']}: {v['message_text']} (Grupo: {v.get('chat_title', 'Desconocido')})"
                   for i, (k, v) in enumerate(peticiones_registradas.items(), 1)]
     if not pendientes:
         respuesta = "📋 No hay solicitudes pendientes. 🌟"
     else:
-        respuesta = "📋 *Solicitudes pendientes* 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
+        respuesta = "📋 *Solicitudes pendientes* 🌟\n" + "\n".join([f"{p}\n{'─' * 20}" for p in pendientes]) + f"\nTotal: {len(pendientes)} pendientes ⏳"
     try:
-        bot.send_message(chat_id=chat_id, text=respuesta)
+        bot.send_message(chat_id=chat_id, text=respuesta, parse_mode='Markdown')
         logger.info("Lista de pendientes enviada al grupo destino")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=respuesta)
