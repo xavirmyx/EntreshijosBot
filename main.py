@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 import os
 import random
-import logging  # Añadimos logging para los logs en Render
+import logging
 
 # Configura tu token, grupo y URL del webhook usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
@@ -27,7 +27,8 @@ dispatcher = Dispatcher(bot, None, workers=1)
 ticket_counter = 150  # Comienza en 150
 peticiones_por_usuario = {}  # {user_id: {"count": X, "chat_id": Y, "username": Z}}
 peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T}}
-admin_ids = set([12345678])  # Lista de IDs de administradores (cámbialos según necesites)
+procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
+admin_ids = set([12345678])  # Lista de IDs de administradores
 aceptar_solicitudes = True  # Controla si se aceptan solicitudes
 grupos_activos = set()  # Almacena los chat_ids de los grupos donde está el bot
 
@@ -39,14 +40,16 @@ frases_agradecimiento = [
     "¡Gracias por usar el bot! 🎉"
 ]
 
-# Sticker IDs (puedes reemplazarlos con los tuyos)
+# Sticker IDs (verifica estos IDs o cámbialos con @Stickers)
 STICKER_OFF = "CAACAgUAAxkBAAEBzIZjG5r6c4n9Xv7bK7XwG2g5i1jVAAL_AQACZQcYSrZ2q2s3T0sZHgQ"
 STICKER_ON = "CAACAgUAAxkBAAEBzIdjG5r8wU0fQ6zU5H8Xg3O5cK9xAAL_AQACZQcYSvN8XhR0jW0ZHgQ"
 
-# Función para escapar caracteres especiales en Markdown
-def escape_markdown(text):
+# Función para escapar caracteres especiales en Markdown, pero preservando @name
+def escape_markdown(text, preserve_username=False):
     if not text:
         return text
+    if preserve_username and text.startswith('@'):
+        return text  # No escapamos el @name
     characters_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in characters_to_escape:
         text = text.replace(char, f'\\{char}')
@@ -54,9 +57,15 @@ def escape_markdown(text):
 
 # Función para manejar mensajes con #solicito, /solicito, #peticion o /peticion
 def handle_message(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje recibido es None")
         return
+
+    update_id = update.update_id
+    if update_id in procesado:
+        logger.info(f"Duplicación detectada, actualización {update_id} ya procesada")
+        return
+    procesado[update_id] = True
 
     message = update.message
     chat_id = message.chat_id
@@ -65,39 +74,31 @@ def handle_message(update, context):
     message_text = message.text or ''
     chat_title = message.chat.title or 'Chat privado'
 
-    # Registra el grupo activo
     grupos_activos.add(chat_id)
     logger.info(f"Grupo activo registrado: {chat_id}")
 
-    # Obtiene la fecha y hora en formato local
     timestamp = datetime.now(pytz.timezone('UTC')).strftime('%d/%m/%Y %H:%M:%S')
-
-    # Escapa caracteres especiales para Markdown
-    username_escaped = escape_markdown(username)
+    username_escaped = escape_markdown(username, preserve_username=True)
     message_text_escaped = escape_markdown(message_text)
     chat_title_escaped = escape_markdown(chat_title)
 
-    # Verifica si el mensaje contiene #solicito, /solicito, #peticion o /peticion
     if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion', '/peticion']):
-        logger.info(f"Solicitud recibida de {username_escaped} en {chat_title_escaped}: {message_text_escaped}")
+        logger.info(f"Solicitud recibida de {username} en {chat_title}: {message_text}")
         if not aceptar_solicitudes:
             notificacion = (
                 f"🚫 {username_escaped}, de momento no se aceptan solicitudes. Equipo de administración. 🌟"
             )
             bot.send_message(chat_id=chat_id, text=notificacion)
-            logger.info(f"Solicitudes desactivadas, notificado a {username_escaped}")
+            logger.info(f"Solicitudes desactivadas, notificado a {username}")
             return
 
-        # Excepción para administradores
         if user_id in admin_ids:
-            pass  # Los administradores no tienen límite
+            pass
         else:
-            # Verifica el límite de 2 peticiones por usuario
             if user_id not in peticiones_por_usuario:
                 peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
             peticiones_por_usuario[user_id]["count"] += 1
 
-            # Si excede el límite, notifica y activa GroupHelp
             if peticiones_por_usuario[user_id]["count"] > 2:
                 limite_message = (
                     f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta de nuevo mañana. 🌟"
@@ -105,21 +106,18 @@ def handle_message(update, context):
                 bot.send_message(chat_id=chat_id, text=limite_message)
                 warn_message = f"/warn {username_escaped} Limite de peticiones diarias superadas"
                 bot.send_message(chat_id=chat_id, text=warn_message)
-                logger.info(f"Límite excedido por {username_escaped}, advertencia enviada: {warn_message}")
+                logger.info(f"Límite excedido por {username}, advertencia enviada: {warn_message}")
                 return
 
-        # Incrementa el contador de tickets global
         global ticket_counter
         ticket_counter += 1
         ticket_number = ticket_counter
 
-        # Mensaje para el grupo destino
-        peticion_count = peticiones_por_usuario[user_id]["count"]
         destino_message = (
             "📬 Nueva solicitud recibida  \n"
             f"👤 Usuario: {username_escaped} (ID: {user_id})  \n"
             f"     ticket Número - {ticket_number}  \n"
-            f"     Petición {peticion_count}/2  \n"
+            f"     Petición {peticiones_por_usuario[user_id]['count']}/2  \n"
             f"📝 Mensaje: {message_text_escaped}  \n"
             f"🏠 Grupo: {chat_title_escaped}  \n"
             f"🕒 Fecha y hora: {timestamp}  \n"
@@ -127,7 +125,6 @@ def handle_message(update, context):
         )
         try:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
-            # Almacena información con timestamp y chat_title
             peticiones_registradas[ticket_number] = {
                 "chat_id": chat_id,
                 "username": username,
@@ -149,7 +146,6 @@ def handle_message(update, context):
             }
             logger.error(f"Error al enviar al grupo destino con Markdown: {e}")
 
-        # Mensaje de confirmación al usuario (solo una vez)
         agradecimiento = random.choice(frases_agradecimiento)
         confirmacion_message = (
             "✅ ¡Solicitud enviada con éxito! 🎉  \n"
@@ -163,28 +159,25 @@ def handle_message(update, context):
         )
         try:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
-            bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
-            logger.info(f"Confirmación enviada a {username_escaped} en {chat_id}")
+            logger.info(f"Confirmación enviada a {username} en {chat_id}")
         except telegram.error.BadRequest as e:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode=None)
             logger.error(f"Error al enviar confirmación con Markdown: {e}")
 
 # Función para manejar el comando /eliminar [ticket] [estado]
 def handle_eliminar(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /eliminar recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /eliminar fuera del grupo destino: {chat_id}")
         return
 
-    # Obtiene los argumentos del comando
     args = context.args
     if len(args) < 2:
         bot.send_message(chat_id=chat_id, text="❗ Uso: /eliminar [ticket] [aprobada/denegada/eliminada]. Ejemplo: /eliminar 150 aprobada 🌟")
@@ -197,24 +190,20 @@ def handle_eliminar(update, context):
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número válido. Ejemplo: /eliminar 150 aprobada 🌟")
         return
 
-    # Verifica si el ticket existe
     if ticket_number not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
         logger.info(f"Ticket #{ticket_number} no encontrado para /eliminar")
         return
 
-    # Obtiene la información almacenada
     peticion_info = peticiones_registradas[ticket_number]
     user_chat_id = peticion_info["chat_id"]
     username = peticion_info["username"]
     message_text = peticion_info["message_text"]
     message_id = peticion_info["message_id"]
 
-    # Escapa caracteres para Markdown
-    username_escaped = escape_markdown(username)
+    username_escaped = escape_markdown(username, preserve_username=True)
     message_text_escaped = escape_markdown(message_text)
 
-    # Elimina el mensaje del grupo destino
     try:
         bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
         bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} eliminada ({estado}). 🌟")
@@ -223,7 +212,6 @@ def handle_eliminar(update, context):
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {e}. Notificando de todos modos. 🌟")
         logger.error(f"Error al eliminar mensaje #{ticket_number}: {e}")
 
-    # Notifica al usuario en su grupo
     if estado == "aprobada":
         notificacion = (
             f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido aprobada. ¡Gracias! 🎉"
@@ -243,31 +231,27 @@ def handle_eliminar(update, context):
 
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
-        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_ON)
-        logger.info(f"Notificación de /eliminar enviada a {username_escaped} en {user_chat_id}")
+        logger.info(f"Notificación de /eliminar enviada a {username} en {user_chat_id}")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
         logger.error(f"Error al notificar a {username_escaped}: {e}")
 
-    # Elimina la información del diccionario
     del peticiones_registradas[ticket_number]
 
 # Función para manejar el comando /subido [ticket]
 def handle_subido(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /subido recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /subido fuera del grupo destino: {chat_id}")
         return
 
-    # Obtiene el argumento del comando
     args = context.args
     if len(args) != 1:
         bot.send_message(chat_id=chat_id, text="❗ Uso: /subido [ticket]. Ejemplo: /subido 150 🌟")
@@ -279,51 +263,44 @@ def handle_subido(update, context):
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número válido. Ejemplo: /subido 150 🌟")
         return
 
-    # Verifica si el ticket existe
     if ticket_number not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
         logger.info(f"Ticket #{ticket_number} no encontrado para /subido")
         return
 
-    # Obtiene la información almacenada
     peticion_info = peticiones_registradas[ticket_number]
     user_chat_id = peticion_info["chat_id"]
     username = peticion_info["username"]
     message_text = peticion_info["message_text"]
 
-    # Escapa caracteres para Markdown
-    username_escaped = escape_markdown(username)
+    username_escaped = escape_markdown(username, preserve_username=True)
     message_text_escaped = escape_markdown(message_text)
 
-    # Notifica al usuario en su grupo
     notificacion = (
         f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido subida. ¡Gracias! 🎉"
     )
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
-        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_ON)
         bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} marcada como subida. 🌟")
-        logger.info(f"Notificación de /subido enviada a {username_escaped} en {user_chat_id}")
+        logger.info(f"Notificación de /subido enviada a {username} en {user_chat_id}")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
         logger.error(f"Error al notificar a {username_escaped}: {e}")
 
 # Función para manejar el comando /denegado [ticket]
 def handle_denegado(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /denegado recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /denegado fuera del grupo destino: {chat_id}")
         return
 
-    # Obtiene el argumento del comando
     args = context.args
     if len(args) != 1:
         bot.send_message(chat_id=chat_id, text="❗ Uso: /denegado [ticket]. Ejemplo: /denegado 150 🌟")
@@ -335,45 +312,39 @@ def handle_denegado(update, context):
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número válido. Ejemplo: /denegado 150 🌟")
         return
 
-    # Verifica si el ticket existe
     if ticket_number not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ No se encontró una solicitud con ticket #{ticket_number}. 🌟")
         logger.info(f"Ticket #{ticket_number} no encontrado para /denegado")
         return
 
-    # Obtiene la información almacenada
     peticion_info = peticiones_registradas[ticket_number]
     user_chat_id = peticion_info["chat_id"]
     username = peticion_info["username"]
     message_text = peticion_info["message_text"]
 
-    # Escapa caracteres para Markdown
-    username_escaped = escape_markdown(username)
+    username_escaped = escape_markdown(username, preserve_username=True)
     message_text_escaped = escape_markdown(message_text)
 
-    # Notifica al usuario en su grupo
     notificacion = (
         f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
     )
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
-        bot.send_sticker(chat_id=user_chat_id, sticker=STICKER_OFF)
         bot.send_message(chat_id=chat_id, text=f"✅ Solicitud con ticket #{ticket_number} de {username_escaped} marcada como denegada. 🌟")
-        logger.info(f"Notificación de /denegado enviada a {username_escaped} en {user_chat_id}")
+        logger.info(f"Notificación de /denegado enviada a {username} en {user_chat_id}")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {e}. 🌟")
         logger.error(f"Error al notificar a {username_escaped}: {e}")
 
 # Función para manejar el comando /menu (solo en grupo destino)
 def handle_menu(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /menu recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /menu fuera del grupo destino: {chat_id}")
@@ -395,19 +366,18 @@ def handle_menu(update, context):
         bot.send_message(chat_id=chat_id, text=menu_message, parse_mode='Markdown')
         logger.info("Menú enviado al grupo destino")
     except telegram.error.BadRequest as e:
-        bot.send_message(chat_id=chat_id, text=menu_message, parse_mode=None)
+        bot.send_message(chat_id=chat_id, text=menu_message.replace('*', '').replace('**', ''))  # Simplifica Markdown
         logger.error(f"Error al enviar menú con Markdown: {e}")
 
 # Función para manejar el comando /off (solo en grupo destino)
 def handle_off(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /off recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /off fuera del grupo destino: {chat_id}")
@@ -416,7 +386,6 @@ def handle_off(update, context):
     global aceptar_solicitudes
     aceptar_solicitudes = False
 
-    # Notificación a todos los grupos
     off_message = (
         "🚫 ¡Atención usuarios! 🌟\n"
         "De momento no se aceptan solicitudes hasta nuevo aviso. Equipo de administración.\n"
@@ -425,7 +394,6 @@ def handle_off(update, context):
     for grupo in grupos_activos:
         try:
             bot.send_message(chat_id=grupo, text=off_message)
-            bot.send_sticker(chat_id=grupo, sticker=STICKER_OFF)
             logger.info(f"Notificación /off enviada al grupo {grupo}")
         except telegram.error.TelegramError as e:
             logger.error(f"Error al notificar /off al grupo {grupo}: {e}")
@@ -435,14 +403,13 @@ def handle_off(update, context):
 
 # Función para manejar el comando /on (solo en grupo destino)
 def handle_on(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /on recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /on fuera del grupo destino: {chat_id}")
@@ -451,7 +418,6 @@ def handle_on(update, context):
     global aceptar_solicitudes
     aceptar_solicitudes = True
 
-    # Notificación a todos los grupos
     on_message = (
         "🎉 ¡Buenas noticias! 🌟\n"
         "Ya se pueden enviar solicitudes con /solicito, #solicito, /peticion o #peticion.\n"
@@ -460,7 +426,6 @@ def handle_on(update, context):
     for grupo in grupos_activos:
         try:
             bot.send_message(chat_id=grupo, text=on_message)
-            bot.send_sticker(chat_id=grupo, sticker=STICKER_ON)
             logger.info(f"Notificación /on enviada al grupo {grupo}")
         except telegram.error.TelegramError as e:
             logger.error(f"Error al notificar /on al grupo {grupo}: {e}")
@@ -470,35 +435,34 @@ def handle_on(update, context):
 
 # Función para manejar el comando /pendientes (solo en grupo destino)
 def handle_pendientes(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /pendientes recibido es None")
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Solo permitir este comando en el grupo destino
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         logger.info(f"Intento de /pendientes fuera del grupo destino: {chat_id}")
         return
 
-    pendientes = [f"{i}. Ticket #{k} - {v['username']}: \"{escape_markdown(v['message_text'])}\" (Grupo: {escape_markdown(v.get('chat_title', 'Desconocido'))})" 
+    pendientes = [f"{i}. Ticket #{k} - {v['username']}: {v['message_text']} (Grupo: {v.get('chat_title', 'Desconocido')})"
                   for i, (k, v) in enumerate(peticiones_registradas.items(), 1)]
     if not pendientes:
         respuesta = "📋 No hay solicitudes pendientes. 🌟"
     else:
         respuesta = "📋 Solicitudes pendientes 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
     try:
-        bot.send_message(chat_id=chat_id, text=respuesta, parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text=respuesta)
         logger.info("Lista de pendientes enviada al grupo destino")
-    except telegram.error.BadRequest as e:
-        bot.send_message(chat_id=chat_id, text=respuesta, parse_mode=None)
-        logger.error(f"Error al enviar pendientes con Markdown: {e}")
+    except telegram.error.TelegramError as e:
+        bot.send_message(chat_id=chat_id, text=respuesta)
+        logger.error(f"Error al enviar pendientes: {e}")
 
 # Función para manejar el comando /ayuda
 def handle_ayuda(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /ayuda recibido es None")
         return
 
@@ -515,15 +479,14 @@ def handle_ayuda(update, context):
     )
     try:
         bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode='Markdown')
-        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
         logger.info(f"Ayuda enviada a {username} en {chat_id}")
     except telegram.error.BadRequest as e:
-        bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode=None)
+        bot.send_message(chat_id=chat_id, text=ayuda_message.replace('*', '').replace('**', ''))
         logger.error(f"Error al enviar ayuda con Markdown: {e}")
 
 # Función para manejar el comando /estado
 def handle_estado(update, context):
-    if not update.message:  # Verifica que update.message no sea None
+    if not update.message:
         logger.warning("Mensaje /estado recibido es None")
         return
 
@@ -547,7 +510,7 @@ def handle_estado(update, context):
         timestamp = peticion_info["timestamp"].strftime('%d/%m/%Y %H:%M:%S')
         estado_message = (
             f"📋 Estado de tu solicitud, {username} 🌟\n"
-            f"Ticket #{ticket_number}: \"{escape_markdown(peticion_info['message_text'])}\"\n"
+            f"Ticket #{ticket_number}: {peticion_info['message_text']}\n"
             f"Estado: Pendiente ⏳\n"
             f"🕒 Enviada: {timestamp}"
         )
@@ -557,12 +520,11 @@ def handle_estado(update, context):
             f"Ticket #{ticket_number}: Ya fue gestionada (aprobada, denegada o eliminada). ✅"
         )
     try:
-        bot.send_message(chat_id=chat_id, text=estado_message, parse_mode='Markdown')
-        bot.send_sticker(chat_id=chat_id, sticker=STICKER_ON)
+        bot.send_message(chat_id=chat_id, text=estado_message)
         logger.info(f"Estado de ticket #{ticket_number} enviado a {username} en {chat_id}")
-    except telegram.error.BadRequest as e:
-        bot.send_message(chat_id=chat_id, text=estado_message, parse_mode=None)
-        logger.error(f"Error al enviar estado con Markdown: {e}")
+    except telegram.error.TelegramError as e:
+        bot.send_message(chat_id=chat_id, text=estado_message)
+        logger.error(f"Error al enviar estado: {e}")
 
 # Añade los handlers
 message_handler = MessageHandler(Filters.text & ~Filters.command, handle_message)
