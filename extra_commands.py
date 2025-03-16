@@ -1,8 +1,10 @@
 from telegram.ext import CommandHandler
+import telegram  # Importamos el módulo telegram para manejar excepciones
 import logging
 import random
 from datetime import datetime
 import pytz
+from config import bot, admin_ids, GROUP_DESTINO, grupos_activos, procesado, peticiones_registradas, peticiones_por_usuario
 
 logger = logging.getLogger(__name__)
 

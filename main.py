@@ -1,36 +1,21 @@
 from flask import Flask, request
-import telegram
 from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters
 from datetime import datetime
 import pytz
-import os
 import random
 import logging
-
-# Configura tu token, grupo y URL del webhook usando variables de entorno
-TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
-GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
+import os  # Añadimos esta línea para importar el módulo os
+from config import bot, admin_ids, GROUP_DESTINO, grupos_activos, procesado, peticiones_registradas, peticiones_por_usuario, ticket_counter, aceptar_solicitudes, WEBHOOK_URL
 
 # Configura el logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Inicializa el bot y Flask
-bot = telegram.Bot(token=TOKEN)
+# Inicializa Flask
 app = Flask(__name__)
 
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
-
-# Diccionarios para almacenamiento en memoria
-ticket_counter = 150  # Comienza en 150
-peticiones_por_usuario = {}  # {user_id: {"count": X, "chat_id": Y, "username": Z}}
-peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T}}
-procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
-admin_ids = set([12345678])  # Lista de IDs de administradores
-aceptar_solicitudes = True  # Controla si se aceptan solicitudes
-grupos_activos = set()  # Almacena los chat_ids de los grupos donde está el bot
 
 # Frases de agradecimiento aleatorias
 frases_agradecimiento = [
@@ -341,7 +326,7 @@ def handle_denegado(update, context):
         bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {str(e)}. 🌟")
         logger.error(f"Error al notificar a {username_escaped}: {str(e)}")
 
-# Función para manejar el comando /menu (solo en grupo destino) - ACTUALIZADO
+# Función para manejar el comando /menu (solo en grupo destino)
 def handle_menu(update, context):
     if not update.message:
         logger.warning("Mensaje /menu recibido es None")
@@ -469,14 +454,14 @@ def handle_pendientes(update, context):
         logger.info(f"Intento de /pendientes fuera del grupo destino: {chat_id}")
         return
 
-    pendientes = [f"{i}. 🎫 Ticket #{k} - {v['username']}: {v['message_text']} (Grupo: {v.get('chat_title', 'Desconocido')})"
+    pendientes = [f"{i}. Ticket #{k} - {v['username']}: {v['message_text']} (Grupo: {v.get('chat_title', 'Desconocido')})"
                   for i, (k, v) in enumerate(peticiones_registradas.items(), 1)]
     if not pendientes:
         respuesta = "📋 No hay solicitudes pendientes. 🌟"
     else:
-        respuesta = "📋 *Solicitudes pendientes* 🌟\n" + "\n".join([f"{p}\n{'─' * 20}" for p in pendientes]) + f"\nTotal: {len(pendientes)} pendientes ⏳"
+        respuesta = "📋 *Solicitudes pendientes* 🌟\n" + "\n".join(pendientes) + f"\nTotal: {len(pendientes)} pendientes ⏳"
     try:
-        bot.send_message(chat_id=chat_id, text=respuesta, parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text=respuesta)
         logger.info("Lista de pendientes enviada al grupo destino")
     except telegram.error.TelegramError as e:
         bot.send_message(chat_id=chat_id, text=respuesta)
@@ -651,4 +636,4 @@ def health_check():
 
 if __name__ == '__main__':
     logger.info("Iniciando el bot en modo local")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
