@@ -40,10 +40,6 @@ frases_agradecimiento = [
     "¡Gracias por usar el bot! 🎉"
 ]
 
-# Sticker IDs (verifica estos IDs o cámbialos con @Stickers)
-STICKER_OFF = "CAACAgUAAxkBAAEBzIZjG5r6c4n9Xv7bK7XwG2g5i1jVAAL_AQACZQcYSrZ2q2s3T0sZHgQ"
-STICKER_ON = "CAACAgUAAxkBAAEBzIdjG5r8wU0fQ6zU5H8Xg3O5cK9xAAL_AQACZQcYSvN8XhR0jW0ZHgQ"
-
 # Función para escapar caracteres especiales en Markdown, pero preservando @name
 def escape_markdown(text, preserve_username=False):
     if not text:
@@ -118,7 +114,7 @@ def handle_message(update, context):
             f"👤 Usuario: {username_escaped} (ID: {user_id})  \n"
             f"     ticket Número - {ticket_number}  \n"
             f"     Petición {peticiones_por_usuario[user_id]['count']}/2  \n"
-            f"📝 Mensaje: {message_text_escaped}  \n"
+            f"📝 Mensaje: {message_text}  \n"  # Usamos texto plano para evitar errores
             f"🏠 Grupo: {chat_title_escaped}  \n"
             f"🕒 Fecha y hora: {timestamp}  \n"
             "🌟 Bot de Entreshijos"
@@ -135,7 +131,7 @@ def handle_message(update, context):
             }
             logger.info(f"Solicitud #{ticket_number} enviada al grupo destino")
         except telegram.error.BadRequest as e:
-            sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode=None)
+            sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message.replace('*', '').replace('**', ''))
             peticiones_registradas[ticket_number] = {
                 "chat_id": chat_id,
                 "username": username,
@@ -146,22 +142,21 @@ def handle_message(update, context):
             }
             logger.error(f"Error al enviar al grupo destino con Markdown: {e}")
 
-        agradecimiento = random.choice(frases_agradecimiento)
         confirmacion_message = (
             "✅ ¡Solicitud enviada con éxito! 🎉  \n"
             f"Hola {username_escaped}, tu solicitud ha sido registrada con ticket #{ticket_number}. 📩  \n"
             f"👤 ID: {user_id}  \n"
-            f"🏠 Grupo: {chat_title_escaped}  \n"
+            f"🏠 Grupo: {chat_title}  \n"  # Texto plano
             f"🕒 Fecha y hora: {timestamp}  \n"
-            f"📝 Mensaje: {message_text_escaped}  \n"
-            f"{agradecimiento}  \n"
+            f"📝 Mensaje: {message_text}  \n"  # Texto plano
+            f"{random.choice(frases_agradecimiento)}  \n"
             "🌟 Bot de Entreshijos"
         )
         try:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
             logger.info(f"Confirmación enviada a {username} en {chat_id}")
         except telegram.error.BadRequest as e:
-            bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode=None)
+            bot.send_message(chat_id=chat_id, text=confirmacion_message.replace('*', '').replace('**', ''))
             logger.error(f"Error al enviar confirmación con Markdown: {e}")
 
 # Función para manejar el comando /eliminar [ticket] [estado]
@@ -214,19 +209,19 @@ def handle_eliminar(update, context):
 
     if estado == "aprobada":
         notificacion = (
-            f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido aprobada. ¡Gracias! 🎉"
+            f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido aprobada. ¡Gracias! 🎉"
         )
     elif estado == "denegada":
         notificacion = (
-            f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
+            f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
         )
     elif estado == "eliminada":
         notificacion = (
-            f"ℹ️ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido eliminada. 🌟"
+            f"ℹ️ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido eliminada. 🌟"
         )
     else:
         notificacion = (
-            f"ℹ️ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido eliminada. 🌟"
+            f"ℹ️ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido eliminada. 🌟"
         )
 
     try:
@@ -274,10 +269,9 @@ def handle_subido(update, context):
     message_text = peticion_info["message_text"]
 
     username_escaped = escape_markdown(username, preserve_username=True)
-    message_text_escaped = escape_markdown(message_text)
 
     notificacion = (
-        f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido subida. ¡Gracias! 🎉"
+        f"✅ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido subida. ¡Gracias! 🎉"
     )
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
@@ -323,10 +317,9 @@ def handle_denegado(update, context):
     message_text = peticion_info["message_text"]
 
     username_escaped = escape_markdown(username, preserve_username=True)
-    message_text_escaped = escape_markdown(message_text)
 
     notificacion = (
-        f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text_escaped}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
+        f"❌ {username_escaped}, tu solicitud con ticket #{ticket_number} \"{message_text}\" ha sido denegada. Contacta a un administrador si tienes dudas. 🌟"
     )
     try:
         bot.send_message(chat_id=user_chat_id, text=notificacion)
@@ -351,8 +344,14 @@ def handle_menu(update, context):
         return
 
     menu_message = (
-        "📋 **Menú de comandos para administradores** 🌟\n"
-        "Aquí tienes los comandos disponibles:\n"
+        "📋 **Menú de comandos** 🌟\n"
+        "Aquí tienes todos los comandos disponibles:\n"
+        "🔧 **Comandos para usuarios:**\n"
+        "✅ **/solicito** o **#solicito** - Enviar una solicitud (máx. 2 por día).\n"
+        "✅ **/peticion** o **#peticion** - Enviar una solicitud (máx. 2 por día).\n"
+        "✅ **/ayuda** - Ver esta guía.\n"
+        "✅ **/estado [ticket]** - Consultar el estado de una solicitud (ejemplo: /estado 150).\n"
+        "🔧 **Comandos para administradores:**\n"
         "✅ **/eliminar [ticket] [estado]** - Elimina una solicitud y notifica al usuario (ejemplo: /eliminar 150 aprobada).\n"
         "✅ **/subido [ticket]** - Marca una solicitud como subida y notifica al usuario.\n"
         "✅ **/denegado [ticket]** - Marca una solicitud como denegada y notifica al usuario.\n"
@@ -366,7 +365,7 @@ def handle_menu(update, context):
         bot.send_message(chat_id=chat_id, text=menu_message, parse_mode='Markdown')
         logger.info("Menú enviado al grupo destino")
     except telegram.error.BadRequest as e:
-        bot.send_message(chat_id=chat_id, text=menu_message.replace('*', '').replace('**', ''))  # Simplifica Markdown
+        bot.send_message(chat_id=chat_id, text=menu_message.replace('*', '').replace('**', ''))  # Fallback a texto plano
         logger.error(f"Error al enviar menú con Markdown: {e}")
 
 # Función para manejar el comando /off (solo en grupo destino)
