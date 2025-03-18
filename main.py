@@ -10,7 +10,7 @@ import logging
 
 # Configura tu token, grupo y URL del webhook usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
-GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
+GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')  # Grupo de administradores
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 
 # Configura el logging
@@ -29,7 +29,7 @@ ticket_counter = 150  # Comienza en 150
 peticiones_por_usuario = {}  # {user_id: {"count": X, "chat_id": Y, "username": Z}}
 peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T}}
 procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
-admin_ids = set([12345678])  # Lista de IDs de administradores (ajusta según tus admins)
+admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, no se usará para permisos en GROUP_DESTINO)
 grupos_estados = {}  # {chat_id: {"activo": True/False, "title": "Nombre del grupo"}}
 grupos_activos = set()  # Almacena los chat_ids de los grupos donde está el bot
 grupos_seleccionados = {}  # {chat_id_admin: {"accion": "on/off", "grupos": set()}}
@@ -40,6 +40,14 @@ frases_agradecimiento = [
     "¡Agradecemos tu confianza! 💖",
     "¡Tu apoyo es valioso! 🌟",
     "¡Gracias por usar el bot! 🎉"
+]
+
+# Respuestas divertidas para /ping
+ping_respuestas = [
+    "🏓 *¡Pong!* El bot está en línea, listo para arrasar. 🌟",
+    "🎾 *¡Pong!* Aquí estoy, más vivo que nunca. 💪✨",
+    "🚀 *¡Pong!* El bot despega, todo en orden. 🌍",
+    "🎉 *¡Pong!* Online y con ganas de fiesta. 🥳🌟"
 ]
 
 # Función para escapar caracteres especiales en Markdown
@@ -98,22 +106,19 @@ def handle_message(update, context):
             logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
-        if user_id in admin_ids:
-            pass
-        else:
-            if user_id not in peticiones_por_usuario:
-                peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
-            peticiones_por_usuario[user_id]["count"] += 1
+        if user_id not in peticiones_por_usuario:
+            peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
+        peticiones_por_usuario[user_id]["count"] += 1
 
-            if peticiones_por_usuario[user_id]["count"] > 2:
-                limite_message = (
-                    f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
-                )
-                bot.send_message(chat_id=chat_id, text=limite_message)
-                warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
-                bot.send_message(chat_id=chat_id, text=warn_message)
-                logger.info(f"Límite excedido por {username}, advertencia enviada")
-                return
+        if peticiones_por_usuario[user_id]["count"] > 2 and user_id not in admin_ids:
+            limite_message = (
+                f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
+            )
+            bot.send_message(chat_id=chat_id, text=limite_message)
+            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
+            bot.send_message(chat_id=chat_id, text=warn_message)
+            logger.info(f"Límite excedido por {username}, advertencia enviada")
+            return
 
         global ticket_counter
         ticket_counter += 1
@@ -180,13 +185,9 @@ def handle_on(update, context):
 
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
-        return
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
     if not grupos_activos:
@@ -214,13 +215,9 @@ def handle_off(update, context):
 
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
-        return
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
     if not grupos_activos:
@@ -248,13 +245,9 @@ def handle_grupos(update, context):
 
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
-        return
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
     if not grupos_estados:
@@ -275,13 +268,9 @@ def handle_eliminar(update, context):
 
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
-        return
-    if user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Solo administradores pueden usar este comando. 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
     if not peticiones_registradas:
@@ -297,6 +286,16 @@ def handle_eliminar(update, context):
     bot.send_message(chat_id=chat_id,
                      text="🗑️ *Eliminar solicitud* 🌟\nSelecciona el ticket a eliminar:",
                      reply_markup=reply_markup, parse_mode='Markdown')
+
+# Comando /ping
+def handle_ping(update, context):
+    if not update.message:
+        logger.warning("Mensaje /ping recibido es None")
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+    bot.send_message(chat_id=chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
 
 # Manejo de botones
 def button_handler(update, context):
@@ -324,7 +323,7 @@ def button_handler(update, context):
             grupos_estados[grupo_id]["activo"] = (accion == "on")
 
         keyboard = [
-            [InlineKeyboardButton("✅ Sí", callback_data=f"{accion}_notificar_si")],
+            [InlineKeyboardButton("✅ Sí", callback_data=f"{accion}_notificar_sí")],
             [InlineKeyboardButton("❌ No", callback_data=f"{accion}_notificar_no")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -403,21 +402,12 @@ def button_handler(update, context):
         del peticiones_registradas[ticket]
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como {estado}.* 🌟", parse_mode='Markdown')
 
-# Añadir handlers
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-dispatcher.add_handler(CommandHandler('on', handle_on))
-dispatcher.add_handler(CommandHandler('off', handle_off))
-dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
-dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
-dispatcher.add_handler(CallbackQueryHandler(button_handler))
-
-# Funciones originales con correcciones
+# Funciones originales con permisos ajustados
 def handle_subido(update, context):
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
-    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
     args = context.args
     if len(args) != 1:
@@ -439,9 +429,8 @@ def handle_subido(update, context):
 def handle_denegado(update, context):
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
-    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
     args = context.args
     if len(args) != 1:
@@ -463,9 +452,8 @@ def handle_denegado(update, context):
 def handle_menu(update, context):
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
     menu_message = (
         "📋 *Menú de comandos* 🌟\n"
@@ -473,7 +461,8 @@ def handle_menu(update, context):
         "✅ */solicito*, *#solicito*, */peticion*, *#peticion* - Enviar solicitud (máx. 2/día).\n"
         "🔍 */estado [ticket]* - Consultar estado.\n"
         "📖 */ayuda* - Guía rápida.\n"
-        "🔧 *Administradores:*\n"
+        "🏓 */ping* - Verificar si el bot está vivo.\n"
+        "🔧 *Comandos en grupo destino:*\n"
         "🗑️ */eliminar* - Eliminar solicitud con botones.\n"
         "✅ */subido [ticket]* - Marcar como subida.\n"
         "❌ */denegado [ticket]* - Marcar como denegada.\n"
@@ -489,9 +478,8 @@ def handle_menu(update, context):
 def handle_pendientes(update, context):
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
-    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
     pendientes = [f"#{k} - {v['username']}: {escape_markdown(v['message_text'])} ({v['chat_title']})"
                   for k, v in peticiones_registradas.items()]
@@ -506,6 +494,7 @@ def handle_ayuda(update, context):
         "📖 *Guía rápida* 🌟\n"
         f"Hola {username}, usa */solicito*, *#solicito*, */peticion* o *#peticion* para enviar una solicitud (máx. 2/día).\n"
         "🔍 */estado [ticket]* - Consulta el estado.\n"
+        "🏓 */ping* - Verifica si el bot está activo.\n"
         "🌟 *¡Gracias por usar el bot!* 🙌"
     )
     bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode='Markdown')
@@ -537,9 +526,8 @@ def handle_estado(update, context):
 def handle_notificar(update, context):
     message = update.message
     chat_id = message.chat_id
-    user_id = message.from_user.id
-    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
     args = context.args
     if len(args) < 2:
@@ -554,7 +542,13 @@ def handle_notificar(update, context):
     else:
         bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado. 🌟")
 
-# Añadir handlers para comandos originales
+# Añadir handlers
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+dispatcher.add_handler(CommandHandler('on', handle_on))
+dispatcher.add_handler(CommandHandler('off', handle_off))
+dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
+dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
+dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('subido', handle_subido))
 dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
@@ -562,6 +556,7 @@ dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CommandHandler('notificar', handle_notificar))
+dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
