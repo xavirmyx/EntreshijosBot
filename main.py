@@ -32,6 +32,7 @@ procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
 admin_ids = set([12345678])  # Lista de IDs de administradores (ajusta según tus admins)
 grupos_estados = {}  # {chat_id: {"activo": True/False, "title": "Nombre del grupo"}}
 grupos_activos = set()  # Almacena los chat_ids de los grupos donde está el bot
+grupos_seleccionados = {}  # {chat_id_admin: {"accion": "on/off", "grupos": set()}}
 
 # Frases de agradecimiento aleatorias
 frases_agradecimiento = [
@@ -200,6 +201,7 @@ def handle_on(update, context):
     keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="on_confirmar")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set()}
     bot.send_message(chat_id=chat_id,
                      text="🟢 *Activar solicitudes* 🌟\nSelecciona los grupos para activar las solicitudes:",
                      reply_markup=reply_markup, parse_mode='Markdown')
@@ -233,6 +235,7 @@ def handle_off(update, context):
     keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="off_confirmar")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set()}
     bot.send_message(chat_id=chat_id,
                      text="🔴 *Desactivar solicitudes* 🌟\nSelecciona los grupos para desactivar las solicitudes:",
                      reply_markup=reply_markup, parse_mode='Markdown')
@@ -305,43 +308,55 @@ def button_handler(update, context):
     if data.startswith("on_") or data.startswith("off_"):
         accion, grupo_id = data.split("_")
         grupo_id = int(grupo_id)
-        if accion == "on":
-            grupos_estados[grupo_id]["activo"] = True
-            query.edit_message_text(text=query.message.text + f"\n✅ {grupos_estados[grupo_id]['title']} activado.")
-        else:
-            grupos_estados[grupo_id]["activo"] = False
-            query.edit_message_text(text=query.message.text + f"\n❌ {grupos_estados[grupo_id]['title']} desactivado.")
+        if chat_id in grupos_seleccionados:
+            grupos_seleccionados[chat_id]["grupos"].add(grupo_id)
+            title = grupos_estados.get(grupo_id, {}).get("title", "Grupo desconocido")
+            query.edit_message_text(text=query.message.text + f"\n{'🟢' if accion == 'on' else '🔴'} {title} seleccionado.")
         return
 
-    if data == "on_confirmar":
-        on_message = (
-            "🎉 *¡Solicitudes reactivadas!* 🌟\n"
-            "Se pueden enviar solicitudes en los grupos activados.\n"
-            "Máximo 2 por día por usuario. 🙌"
-        )
-        for grupo_id, info in grupos_estados.items():
-            if info["activo"]:
-                try:
-                    bot.send_message(chat_id=grupo_id, text=on_message, parse_mode='Markdown')
-                    logger.info(f"Notificación /on enviada a {grupo_id}")
-                except telegram.error.TelegramError as e:
-                    logger.error(f"Error al notificar /on a {grupo_id}: {str(e)}")
-        query.edit_message_text(text="🟢 *Solicitudes activadas en los grupos seleccionados.* 🌟", parse_mode='Markdown')
+    if data == "on_confirmar" or data == "off_confirmar":
+        accion = "on" if data == "on_confirmar" else "off"
+        if chat_id not in grupos_seleccionados or not grupos_seleccionados[chat_id]["grupos"]:
+            query.edit_message_text(text=f"ℹ️ No se seleccionaron grupos para {'activar' if accion == 'on' else 'desactivar'}. 🌟")
+            return
 
-    elif data == "off_confirmar":
-        off_message = (
-            "🚫 *Solicitudes desactivadas* 🌟\n"
-            "No se aceptan nuevas solicitudes hasta nuevo aviso.\n"
-            "Disculpen las molestias. 🙏"
-        )
-        for grupo_id, info in grupos_estados.items():
-            if not info["activo"]:
+        for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
+            grupos_estados[grupo_id]["activo"] = (accion == "on")
+
+        keyboard = [
+            [InlineKeyboardButton("✅ Sí", callback_data=f"{accion}_notificar_si")],
+            [InlineKeyboardButton("❌ No", callback_data=f"{accion}_notificar_no")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        grupos = "\n".join([grupos_estados[gid]["title"] for gid in grupos_seleccionados[chat_id]["grupos"]])
+        query.edit_message_text(
+            text=f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n"
+                 f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?",
+            reply_markup=reply_markup, parse_mode='Markdown')
+        return
+
+    if data.startswith("on_notificar_") or data.startswith("off_notificar_"):
+        accion, decision = data.split("_notificar_")
+        if decision == "sí":
+            mensaje = (
+                "🎉 *¡Solicitudes reactivadas!* 🌟\nYa se pueden enviar solicitudes.\nMáximo 2 por día por usuario. 🙌"
+            ) if accion == "on" else (
+                "🚫 *Solicitudes desactivadas* 🌟\nNo se aceptan nuevas solicitudes hasta nuevo aviso.\nDisculpen las molestias. 🙏"
+            )
+            for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 try:
-                    bot.send_message(chat_id=grupo_id, text=off_message, parse_mode='Markdown')
-                    logger.info(f"Notificación /off enviada a {grupo_id}")
+                    bot.send_message(chat_id=grupo_id, text=mensaje, parse_mode='Markdown')
+                    logger.info(f"Notificación /{accion} enviada a {grupo_id}")
                 except telegram.error.TelegramError as e:
-                    logger.error(f"Error al notificar /off a {grupo_id}: {str(e)}")
-        query.edit_message_text(text="🔴 *Solicitudes desactivadas en los grupos seleccionados.* 🌟", parse_mode='Markdown')
+                    logger.error(f"Error al notificar /{accion} a {grupo_id}: {str(e)}")
+            query.edit_message_text(
+                text=f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} y notificadas.* 🌟",
+                parse_mode='Markdown')
+        else:
+            query.edit_message_text(
+                text=f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} sin notificación.* 🌟",
+                parse_mode='Markdown')
+        del grupos_seleccionados[chat_id]
 
     elif data.startswith("eliminar_"):
         ticket = int(data.split("_")[1])
@@ -395,20 +410,14 @@ dispatcher.add_handler(CommandHandler('off', handle_off))
 dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
 dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
-dispatcher.add_handler(CommandHandler('subido', lambda u, c: handle_subido(u, c)))  # Mantener los originales
-dispatcher.add_handler(CommandHandler('denegado', lambda u, c: handle_denegado(u, c)))
-dispatcher.add_handler(CommandHandler('menu', lambda u, c: handle_menu(u, c)))
-dispatcher.add_handler(CommandHandler('pendientes', lambda u, c: handle_pendientes(u, c)))
-dispatcher.add_handler(CommandHandler('ayuda', lambda u, c: handle_ayuda(u, c)))
-dispatcher.add_handler(CommandHandler('estado', lambda u, c: handle_estado(u, c)))
-dispatcher.add_handler(CommandHandler('notificar', lambda u, c: handle_notificar(u, c)))
 
-# Funciones originales (sin cambios significativos, solo mejoras menores)
+# Funciones originales con correcciones
 def handle_subido(update, context):
     message = update.message
     chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO or message.from_user.id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Comando restringido al grupo destino y administradores. 🌟")
+    user_id = message.from_user.id
+    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
         return
     args = context.args
     if len(args) != 1:
@@ -430,8 +439,9 @@ def handle_subido(update, context):
 def handle_denegado(update, context):
     message = update.message
     chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO or message.from_user.id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Comando restringido al grupo destino y administradores. 🌟")
+    user_id = message.from_user.id
+    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
         return
     args = context.args
     if len(args) != 1:
@@ -453,13 +463,14 @@ def handle_denegado(update, context):
 def handle_menu(update, context):
     message = update.message
     chat_id = message.chat_id
+    user_id = message.from_user.id
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟")
         return
     menu_message = (
         "📋 *Menú de comandos* 🌟\n"
         "🔧 *Usuarios:*\n"
-        "✅ */solicito* o *#solicito* - Enviar solicitud (máx. 2/día).\n"
+        "✅ */solicito*, *#solicito*, */peticion*, *#peticion* - Enviar solicitud (máx. 2/día).\n"
         "🔍 */estado [ticket]* - Consultar estado.\n"
         "📖 */ayuda* - Guía rápida.\n"
         "🔧 *Administradores:*\n"
@@ -478,8 +489,9 @@ def handle_menu(update, context):
 def handle_pendientes(update, context):
     message = update.message
     chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO or message.from_user.id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Comando restringido al grupo destino y administradores. 🌟")
+    user_id = message.from_user.id
+    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
         return
     pendientes = [f"#{k} - {v['username']}: {escape_markdown(v['message_text'])} ({v['chat_title']})"
                   for k, v in peticiones_registradas.items()]
@@ -492,7 +504,7 @@ def handle_ayuda(update, context):
     username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
     ayuda_message = (
         "📖 *Guía rápida* 🌟\n"
-        f"Hola {username}, usa */solicito* o *#solicito* para enviar una solicitud (máx. 2/día).\n"
+        f"Hola {username}, usa */solicito*, *#solicito*, */peticion* o *#peticion* para enviar una solicitud (máx. 2/día).\n"
         "🔍 */estado [ticket]* - Consulta el estado.\n"
         "🌟 *¡Gracias por usar el bot!* 🙌"
     )
@@ -525,8 +537,9 @@ def handle_estado(update, context):
 def handle_notificar(update, context):
     message = update.message
     chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO or message.from_user.id not in admin_ids:
-        bot.send_message(chat_id=chat_id, text="❌ Comando restringido al grupo destino y administradores. 🌟")
+    user_id = message.from_user.id
+    if str(chat_id) != GROUP_DESTINO or user_id not in admin_ids:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino por administradores. 🌟")
         return
     args = context.args
     if len(args) < 2:
@@ -540,6 +553,15 @@ def handle_notificar(update, context):
         bot.send_message(chat_id=chat_id, text=f"✅ Enviada notificación a {username}. 🌟")
     else:
         bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado. 🌟")
+
+# Añadir handlers para comandos originales
+dispatcher.add_handler(CommandHandler('subido', handle_subido))
+dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
+dispatcher.add_handler(CommandHandler('menu', handle_menu))
+dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
+dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
+dispatcher.add_handler(CommandHandler('estado', handle_estado))
+dispatcher.add_handler(CommandHandler('notificar', handle_notificar))
 
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
