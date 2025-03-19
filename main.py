@@ -43,7 +43,7 @@ GRUPOS_PREDEFINIDOS = {
 # Inicializar grupos activos y estados con nombres reales
 grupos_activos = set(GRUPOS_PREDEFINIDOS.keys())
 grupos_estados = {gid: {"activo": True, "title": title} for gid, title in GRUPOS_PREDEFINIDOS.items()}
-grupos_seleccionados = {}  # {chat_id_admin: {"accion": "on/off", "grupos": set(), "mensaje_id": int}}
+grupos_seleccionados = {}  # {chat_id: {"accion": "on/off", "grupos": set(), "mensaje_id": int, "estado": "seleccion/confirmacion/notificacion"}}
 
 # Frases de agradecimiento aleatorias
 frases_agradecimiento = [
@@ -84,7 +84,7 @@ def update_grupos_estados(chat_id, title=None):
 # Función para manejar mensajes
 def handle_message(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return  # Ignorar silenciosamente para callbacks
 
     update_id = update.update_id
     if update_id in procesado:
@@ -192,7 +192,7 @@ def handle_message(update, context):
 # Comando /on con botones
 def handle_on(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -209,12 +209,11 @@ def handle_on(update, context):
     for grupo_id in grupos_activos:
         title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
         keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}",
-                                             callback_data=f"on_{grupo_id}")])
-    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="on_confirmar")])
-    keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data="on_retroceder")])
+                                             callback_data=f"select_on_{grupo_id}")])
+    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None}
+    grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
     sent_message = bot.send_message(chat_id=chat_id,
                                     text="🟢 *Activar solicitudes* 🌟\nSelecciona los grupos para activar las solicitudes (puedes elegir varios):",
                                     reply_markup=reply_markup, parse_mode='Markdown')
@@ -223,7 +222,7 @@ def handle_on(update, context):
 # Comando /off con botones
 def handle_off(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -240,12 +239,11 @@ def handle_off(update, context):
     for grupo_id in grupos_activos:
         title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
         keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}",
-                                             callback_data=f"off_{grupo_id}")])
-    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="off_confirmar")])
-    keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data="off_retroceder")])
+                                             callback_data=f"select_off_{grupo_id}")])
+    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None}
+    grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
     sent_message = bot.send_message(chat_id=chat_id,
                                     text="🔴 *Desactivar solicitudes* 🌟\nSelecciona los grupos para desactivar las solicitudes (puedes elegir varios):",
                                     reply_markup=reply_markup, parse_mode='Markdown')
@@ -254,7 +252,7 @@ def handle_off(update, context):
 # Comando /grupos
 def handle_grupos(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -278,7 +276,7 @@ def handle_grupos(update, context):
 # Comando /pendientes con botones
 def handle_pendientes(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -304,7 +302,7 @@ def handle_pendientes(update, context):
 # Comando /eliminar con botones
 def handle_eliminar(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -330,7 +328,7 @@ def handle_eliminar(update, context):
 # Comando /ping
 def handle_ping(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -353,6 +351,11 @@ def button_handler(update, context):
     current_text = query.message.text
     current_markup = query.message.reply_markup
 
+    if chat_id not in grupos_seleccionados:
+        return
+
+    estado = grupos_seleccionados[chat_id]["estado"]
+
     # Manejo de Retroceder para /on, /off, /grupos
     if data in ["on_retroceder", "off_retroceder", "grupos_retroceder"]:
         if data == "on_retroceder":
@@ -361,27 +364,21 @@ def button_handler(update, context):
             handle_off(update, context)
         elif data == "grupos_retroceder":
             handle_grupos(update, context)
-        query.message.delete()  # Elimina el mensaje actual para evitar conflictos
+        query.message.delete()
+        del grupos_seleccionados[chat_id]
         return
 
-    # Manejo de /on y /off (selección de grupos)
-    if data.startswith("on_") or data.startswith("off_"):
-        if "_" not in data:
-            logger.error(f"Datos de callback inválidos: {data}")
-            return
-
-        accion, grupo_id_str = data.split("_", 1)
-        if grupo_id_str in ["confirmar", "retroceder"]:
-            logger.warning(f"Ignorando conversión inválida de grupo_id: {grupo_id_str}")
-            return
-
+    # Manejo de selección de grupos para /on y /off
+    if estado == "seleccion" and (data.startswith("select_on_") or data.startswith("select_off_")):
+        accion = "on" if data.startswith("select_on_") else "off"
+        grupo_id_str = data.split("_", 2)[2]
         try:
             grupo_id = int(grupo_id_str)
         except ValueError:
             logger.error(f"Error al convertir grupo_id a entero: {grupo_id_str}")
             return
 
-        if chat_id in grupos_seleccionados and mensaje_id == grupos_seleccionados[chat_id]["mensaje_id"]:
+        if mensaje_id == grupos_seleccionados[chat_id]["mensaje_id"]:
             title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
             if grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 grupos_seleccionados[chat_id]["grupos"].remove(grupo_id)
@@ -395,44 +392,40 @@ def button_handler(update, context):
                 for gid in grupos_activos:
                     title = grupos_estados.get(gid, {}).get("title", f"Grupo {gid}")
                     seleccionado = gid in grupos_seleccionados[chat_id]["grupos"]
+                    callback = f"select_{accion}_{gid}"
                     keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(gid, {}).get('activo', True) else '🔴'}{' ✅' if seleccionado else ''}",
-                                                         callback_data=f"{accion}_{gid}")])
-                keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"{accion}_confirmar")])
-                keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data=f"{accion}_retroceder")])
+                                                         callback_data=callback)])
+                keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}")])
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 query.edit_message_text(text=new_text, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
-    # Manejo de confirmación de /on y /off
-    if data == "on_confirmar" or data == "off_confirmar":
-        accion = "on" if data == "on_confirmar" else "off"
-        if chat_id not in grupos_seleccionados or not grupos_seleccionados[chat_id]["grupos"]:
+    # Manejo de confirmación para /on y /off
+    if estado == "seleccion" and (data == "confirm_on" or data == "confirm_off"):
+        accion = "on" if data == "confirm_on" else "off"
+        if not grupos_seleccionados[chat_id]["grupos"]:
             query.edit_message_text(text=f"ℹ️ No se seleccionaron grupos para {'activar' if accion == 'on' else 'desactivar'}. 🌟", parse_mode='Markdown')
-            if chat_id in grupos_seleccionados:
-                del grupos_seleccionados[chat_id]
+            del grupos_seleccionados[chat_id]
             return
 
-        # Aplicar el cambio de estado a los grupos seleccionados
-        for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
-            grupos_estados[grupo_id]["activo"] = (accion == "on")
-
-        # Preparar el mensaje de confirmación con opciones de notificación
-        keyboard = [
-            [InlineKeyboardButton("✅ Sí", callback_data=f"{accion}_notificar_sí")],
-            [InlineKeyboardButton("❌ No", callback_data=f"{accion}_notificar_no")],
-            [InlineKeyboardButton("🔙 Retroceder", callback_data=f"{accion}_retroceder")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Cambiar el estado a confirmación
+        grupos_seleccionados[chat_id]["estado"] = "confirmacion"
         grupos = "\n".join([grupos_estados[gid]["title"] for gid in grupos_seleccionados[chat_id]["grupos"]])
         texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n" \
                 f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?"
-        if texto != current_text or str(reply_markup) != str(current_markup):
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        keyboard = [
+            [InlineKeyboardButton("✅ Sí", callback_data=f"notify_{accion}_yes")],
+            [InlineKeyboardButton("❌ No", callback_data=f"notify_{accion}_no")],
+            [InlineKeyboardButton("🔙 Retroceder", callback_data=f"back_{accion}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
-    if data.startswith("on_notificar_") or data.startswith("off_notificar_"):
-        accion, decision = data.split("_notificar_")
-        if decision == "sí":
+    # Manejo de notificación para /on y /off
+    if estado == "confirmacion" and data.startswith("notify_"):
+        accion, decision = data.split("_", 2)[1:]
+        if decision == "yes":
             mensaje = (
                 "🎉 *¡Solicitudes reactivadas!* 🌟\nYa se pueden enviar solicitudes.\nMáximo 2 por día por usuario. 🙌"
             ) if accion == "on" else (
@@ -445,29 +438,31 @@ def button_handler(update, context):
                 except telegram.error.TelegramError as e:
                     logger.error(f"Error al notificar /{accion} a {grupo_id}: {str(e)}")
             texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} y notificadas.* 🌟"
-            if texto != current_text:
-                query.edit_message_text(text=texto, parse_mode='Markdown')
+            query.edit_message_text(text=texto, parse_mode='Markdown')
             del grupos_seleccionados[chat_id]
         elif decision == "no":
-            texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} sin notificación.* 🌟"
-            if texto != current_text:
-                query.edit_message_text(text=texto, parse_mode='Markdown')
-            del grupos_seleccionados[chat_id]
-        elif decision == "retroceder":
-            keyboard = []
-            for grupo_id in grupos_activos:
-                title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
-                seleccionado = grupo_id in grupos_seleccionados[chat_id]["grupos"]
-                keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}{' ✅' if seleccionado else ''}",
-                                                     callback_data=f"{accion}_{grupo_id}")])
-            keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"{accion}_confirmar")])
-            keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data=f"{accion}_retroceder")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            texto = f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* 🌟\nSelecciona los grupos (puedes elegir varios):"
             for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
-                grupos_estados[grupo_id]["activo"] = not (accion == "on")  # Revertir cambios
-            if texto != current_text or str(reply_markup) != str(current_markup):
-                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                grupos_estados[grupo_id]["activo"] = (accion == "on")
+            texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} sin notificación.* 🌟"
+            query.edit_message_text(text=texto, parse_mode='Markdown')
+            del grupos_seleccionados[chat_id]
+        return
+
+    # Manejo de retroceder desde confirmación
+    if estado == "confirmacion" and data.startswith("back_"):
+        accion = data.split("_")[1]
+        grupos_seleccionados[chat_id]["estado"] = "seleccion"
+        keyboard = []
+        for grupo_id in grupos_activos:
+            title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
+            seleccionado = grupo_id in grupos_seleccionados[chat_id]["grupos"]
+            callback = f"select_{accion}_{grupo_id}"
+            keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}{' ✅' if seleccionado else ''}",
+                                                 callback_data=callback)])
+        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        texto = f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* 🌟\nSelecciona los grupos (puedes elegir varios):"
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     # Manejo de /pendientes (sin cambios)
@@ -632,7 +627,7 @@ def button_handler(update, context):
 # Comando /subido
 def handle_subido(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -660,7 +655,7 @@ def handle_subido(update, context):
 # Comando /denegado
 def handle_denegado(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -688,7 +683,7 @@ def handle_denegado(update, context):
 # Comando /notificar (manual)
 def handle_notificar(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -737,7 +732,7 @@ def handle_notificar_respuesta(update, context):
 # Comando /menu
 def handle_menu(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -767,7 +762,7 @@ def handle_menu(update, context):
 # Comando /ayuda
 def handle_ayuda(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
@@ -783,7 +778,7 @@ def handle_ayuda(update, context):
 # Comando /estado
 def handle_estado(update, context):
     if not update.message:
-        return  # Ignorar sin loggear advertencia para callbacks
+        return
 
     message = update.message
     chat_id = message.chat_id
