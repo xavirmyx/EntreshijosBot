@@ -31,18 +31,18 @@ peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "me
 procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
 admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, para excepciones en límites)
 
-# Lista de grupos predefinidos donde actúa el bot
-GRUPOS_PREDEFINIDOS = [
-    -1002350263641,  # Biblioteca EnTresHijos
-    -1001886336551,  # Biblioteca Privada EntresHijos
-    -1001918569531,  # SALA DE ENTRESHIJOS.📽*/
-    -1002034968062,  # ᏉᏗᏒᎥᎧᏕ 🖤
-    -1002348662107,  # GLOBAL SPORTS STREAM
-]
+# Lista de grupos predefinidos donde actúa el bot con sus nombres reales
+GRUPOS_PREDEFINIDOS = {
+    -1002350263641: "Biblioteca EnTresHijos",
+    -1001886336551: "Biblioteca Privada EntresHijos",
+    -1001918569531: "SALA DE ENTRESHIJOS.📽",
+    -1002034968062: "ᏉᏗᏒᎥᎧᏕ 🖤",
+    -1002348662107: "GLOBAL SPORTS STREAM",
+}
 
-# Inicializar grupos activos y estados
-grupos_activos = set(GRUPOS_PREDEFINIDOS)
-grupos_estados = {gid: {"activo": True, "title": f"Grupo {gid}"} for gid in GRUPOS_PREDEFINIDOS}
+# Inicializar grupos activos y estados con nombres reales
+grupos_activos = set(GRUPOS_PREDEFINIDOS.keys())
+grupos_estados = {gid: {"activo": True, "title": title} for gid, title in GRUPOS_PREDEFINIDOS.items()}
 grupos_seleccionados = {}  # {chat_id_admin: {"accion": "on/off", "grupos": set(), "mensaje_id": int}}
 
 # Frases de agradecimiento aleatorias
@@ -192,7 +192,7 @@ def handle_message(update, context):
 
 # Comando /on con botones
 def handle_on(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /on recibido es None")
         return
 
@@ -224,7 +224,7 @@ def handle_on(update, context):
 
 # Comando /off con botones
 def handle_off(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /off recibido es None")
         return
 
@@ -256,7 +256,7 @@ def handle_off(update, context):
 
 # Comando /grupos
 def handle_grupos(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /grupos recibido es None")
         return
 
@@ -281,7 +281,7 @@ def handle_grupos(update, context):
 
 # Comando /pendientes con botones
 def handle_pendientes(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /pendientes recibido es None")
         return
 
@@ -308,7 +308,7 @@ def handle_pendientes(update, context):
 
 # Comando /eliminar con botones
 def handle_eliminar(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /eliminar recibido es None")
         return
 
@@ -335,7 +335,7 @@ def handle_eliminar(update, context):
 
 # Comando /ping
 def handle_ping(update, context):
-    if not update.message:
+    if not update or not update.message:
         logger.warning("Mensaje /ping recibido es None")
         return
 
@@ -373,8 +373,17 @@ def button_handler(update, context):
 
     # Manejo de /on y /off
     if data.startswith("on_") or data.startswith("off_"):
-        accion, grupo_id = data.split("_")
-        grupo_id = int(grupo_id)
+        if not (data.startswith("on_") or data.startswith("off_")) or "_" not in data:
+            logger.error(f"Datos de callback inválidos: {data}")
+            return
+
+        accion, grupo_id_str = data.split("_", 1)
+        try:
+            grupo_id = int(grupo_id_str)
+        except ValueError:
+            logger.error(f"Error al convertir grupo_id a entero: {grupo_id_str}")
+            return
+
         if chat_id in grupos_seleccionados and mensaje_id == grupos_seleccionados[chat_id]["mensaje_id"]:
             title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
             if grupo_id in grupos_seleccionados[chat_id]["grupos"]:
@@ -383,14 +392,24 @@ def button_handler(update, context):
             else:
                 grupos_seleccionados[chat_id]["grupos"].add(grupo_id)
                 texto = current_text + f"\n{'🟢' if accion == 'on' else '🔴'} {title} seleccionado."
-            if texto != current_text or str(current_markup) != str(reply_markup):
-                query.edit_message_text(text=texto, reply_markup=current_markup, parse_mode='Markdown')
+
+            keyboard = []
+            for gid in grupos_activos:
+                title = grupos_estados.get(gid, {}).get("title", f"Grupo {gid}")
+                seleccionado = gid in grupos_seleccionados[chat_id]["grupos"]
+                keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(gid, {}).get('activo', True) else '🔴'}{' ✅' if seleccionado else ''}",
+                                                     callback_data=f"{accion}_{gid}")])
+            keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"{accion}_confirmar")])
+            keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data=f"{accion}_retroceder")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data == "on_confirmar" or data == "off_confirmar":
         accion = "on" if data == "on_confirmar" else "off"
         if chat_id not in grupos_seleccionados or not grupos_seleccionados[chat_id]["grupos"]:
-            query.edit_message_text(text=f"ℹ️ No se seleccionaron grupos para {'activar' if accion == 'on' else 'desactivar'}. 🌟")
+            query.edit_message_text(text=f"ℹ️ No se seleccionaron grupos para {'activar' if accion == 'on' else 'desactivar'}. 🌟", parse_mode='Markdown')
             if chat_id in grupos_seleccionados:
                 del grupos_seleccionados[chat_id]
             return
@@ -407,8 +426,7 @@ def button_handler(update, context):
         grupos = "\n".join([grupos_estados[gid]["title"] for gid in grupos_seleccionados[chat_id]["grupos"]])
         texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n" \
                 f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?"
-        if texto != current_text or str(reply_markup) != str(current_markup):
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data.startswith("on_notificar_") or data.startswith("off_notificar_"):
@@ -447,8 +465,7 @@ def button_handler(update, context):
             texto = f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* 🌟\nSelecciona los grupos (puedes elegir varios):"
             for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 grupos_estados[grupo_id]["activo"] = not (accion == "on")  # Revertir cambios
-            if texto != current_text or str(reply_markup) != str(current_markup):
-                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     # Manejo de /pendientes
@@ -460,13 +477,19 @@ def button_handler(update, context):
                                                      callback_data=f"pend_{ticket}")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:"
-            if texto != current_text or str(reply_markup) != str(current_markup):
-                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
-        ticket = int(data.split("_")[1])
+
+        try:
+            ticket = int(data.split("_")[1])
+        except (IndexError, ValueError):
+            logger.error(f"Error al procesar ticket en callback pend_: {data}")
+            return
+
         if ticket not in peticiones_registradas:
-            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟")
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
+
         info = peticiones_registradas[ticket]
         keyboard = [
             [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
@@ -484,16 +507,21 @@ def button_handler(update, context):
             f"🕒 *Fecha:* {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}\n"
             "Selecciona una acción:"
         )
-        if texto != current_text or str(reply_markup) != str(current_markup):
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
-    if data.startswith("pend_") and "_" in data.split("_", 2)[2]:
-        ticket, accion = data.split("_")[1:]
-        ticket = int(ticket)
-        if ticket not in peticiones_registradas:
-            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟")
+    if data.startswith("pend_") and len(data.split("_")) > 2:
+        try:
+            ticket = int(data.split("_")[1])
+            accion = data.split("_")[2]
+        except (IndexError, ValueError):
+            logger.error(f"Error al procesar pend_ callback: {data}")
             return
+
+        if ticket not in peticiones_registradas:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+            return
+
         info = peticiones_registradas[ticket]
         username_escaped = escape_markdown(info["username"], True)
         message_text_escaped = escape_markdown(info["message_text"])
@@ -531,14 +559,18 @@ def button_handler(update, context):
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"📢 *Notificar Ticket #{ticket}* 🌟\nEscribe el mensaje a enviar a {username_escaped} (responde a este mensaje):"
-            if texto != current_text or str(reply_markup) != str(current_markup):
-                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             context.user_data["notificar_ticket"] = ticket
             return
 
     # Manejo de /eliminar
     if data.startswith("eliminar_"):
-        ticket = int(data.split("_")[1])
+        try:
+            ticket = int(data.split("_")[1])
+        except (IndexError, ValueError):
+            logger.error(f"Error al procesar eliminar_ callback: {data}")
+            return
+
         keyboard = [
             [InlineKeyboardButton("✅ Aprobada", callback_data=f"eliminar_{ticket}_aprobada")],
             [InlineKeyboardButton("❌ Denegada", callback_data=f"eliminar_{ticket}_denegada")],
@@ -546,15 +578,20 @@ def button_handler(update, context):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         texto = f"🗑️ *Eliminar Ticket #{ticket}* 🌟\nSelecciona el estado:"
-        if texto != current_text or str(reply_markup) != str(current_markup):
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
-    elif data.startswith("eliminar_") and "_" in data.split("_", 2)[2]:
-        ticket, estado = data.split("_")[1:]
-        ticket = int(ticket)
-        if ticket not in peticiones_registradas:
-            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟")
+    elif data.startswith("eliminar_") and len(data.split("_")) > 2:
+        try:
+            ticket = int(data.split("_")[1])
+            estado = data.split("_")[2]
+        except (IndexError, ValueError):
+            logger.error(f"Error al procesar eliminar_ callback: {data}")
             return
+
+        if ticket not in peticiones_registradas:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+            return
+
         peticion_info = peticiones_registradas[ticket]
         user_chat_id = peticion_info["chat_id"]
         username = peticion_info["username"]
@@ -587,6 +624,10 @@ def button_handler(update, context):
 
 # Comando /subido
 def handle_subido(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /subido recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
@@ -612,6 +653,10 @@ def handle_subido(update, context):
 
 # Comando /denegado
 def handle_denegado(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /denegado recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
@@ -637,6 +682,10 @@ def handle_denegado(update, context):
 
 # Comando /notificar (manual)
 def handle_notificar(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /notificar recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
@@ -657,17 +706,20 @@ def handle_notificar(update, context):
 
 # Manejo de respuestas para notificaciones desde /pendientes
 def handle_notificar_respuesta(update, context):
-    if not update.message or "notificar_ticket" not in context.user_data:
+    if not update or not update.message or "notificar_ticket" not in context.user_data:
         return
+
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
         return
+
     ticket = context.user_data["notificar_ticket"]
     if ticket not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
         del context.user_data["notificar_ticket"]
         return
+
     info = peticiones_registradas[ticket]
     username_escaped = escape_markdown(info["username"], True)
     mensaje = message.text
@@ -680,6 +732,10 @@ def handle_notificar_respuesta(update, context):
 
 # Comando /menu
 def handle_menu(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /menu recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
@@ -707,6 +763,10 @@ def handle_menu(update, context):
 
 # Comando /ayuda
 def handle_ayuda(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /ayuda recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
@@ -720,6 +780,10 @@ def handle_ayuda(update, context):
 
 # Comando /estado
 def handle_estado(update, context):
+    if not update or not update.message:
+        logger.warning("Mensaje /estado recibido es None")
+        return
+
     message = update.message
     chat_id = message.chat_id
     username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
