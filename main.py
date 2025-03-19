@@ -177,7 +177,7 @@ def handle_message(update, context):
             f"🏠 *Grupo:* {chat_title_escaped}  \n"
             f"📅 *Fecha:* {timestamp}  \n"
             f"📝 *Mensaje:* {message_text_escaped}  \n"
-            f"     *Ticket:* {ticket_number} se te ha asignado  \n"
+            f"🎫 *Ticket:* {ticket_number} se te ha asignado  \n"
             "🔹 *Consulta tu solicitud:*  \n"
             "🔍 /estado {ticket_number} – Ver estado 📌  \n"
             "📖 /ayuda – Más información ℹ️  \n\n"
