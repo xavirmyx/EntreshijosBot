@@ -33,7 +33,7 @@ admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, para e
 
 # Lista de grupos predefinidos donde actúa el bot
 GRUPOS_PREDEFINIDOS = [
-    -1002350263641,  # Biblioteca EnTresHijos (según logs)
+    -1002350263641,  # Biblioteca EnTresHijos
     -1001886336551,
     -1001918569531,
     -1002034968062,
@@ -170,17 +170,18 @@ def handle_message(update, context):
             logger.error(f"Error al enviar con Markdown: {str(e)}")
 
         confirmacion_message = (
-            "✅ *Solicitud enviada con éxito* 🎉\n"
-            f"Hola {username_escaped}, tu solicitud ha sido registrada con *ticket #{ticket_number}*.\n"
-            f"👤 *ID:* {user_id}\n"
-            f"🏠 *Grupo:* {chat_title_escaped}\n"
-            f"🕒 *Fecha:* {timestamp}\n"
-            f"📝 *Mensaje:* {message_text_escaped}\n"
-            f"🌟 {random.choice(frases_agradecimiento)}\n\n"
-            "📌 *Comandos útiles:*\n"
-            "🔍 */estado {ticket_number}* - Consulta el estado.\n"
-            "📖 */ayuda* - Más información.\n"
-            "⏳ *Ten paciencia, pronto será atendida.*"
+            "✅ *Solicitud registrada con éxito* 🎉\n"
+            f"Hola {username_escaped}, tu solicitud ha sido guardada con el ticket *#{ticket_number}* en *📚 Bot EnTresHijos*.\n\n"
+            "📌 *Detalles:*  \n"
+            f"🆔 *ID:* {user_id}  \n"
+            f"🏠 *Grupo:* {chat_title_escaped}  \n"
+            f"📅 *Fecha:* {timestamp}  \n"
+            f"📝 *Mensaje:* {message_text_escaped}  \n"
+            f"🎫 *Ticket:* {ticket_number} se te ha asignado  \n"
+            "🔹 *Consulta tu solicitud:*  \n"
+            "🔍 /estado {ticket_number} – Ver estado 📌  \n"
+            "📖 /ayuda – Más información ℹ️  \n\n"
+            "⏳ *Tu solicitud será atendida pronto. ¡Gracias por tu paciencia!* 🙌"
         )
         try:
             bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
@@ -208,10 +209,11 @@ def handle_on(update, context):
 
     keyboard = []
     for grupo_id in grupos_activos:
-        title = grupos_estados.get(grupo_id, {}).get("title", "Grupo desconocido")
+        title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
         keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}",
                                              callback_data=f"on_{grupo_id}")])
     keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="on_confirmar")])
+    keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data="on_retroceder")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None}
@@ -239,10 +241,11 @@ def handle_off(update, context):
 
     keyboard = []
     for grupo_id in grupos_activos:
-        title = grupos_estados.get(grupo_id, {}).get("title", "Grupo desconocido")
+        title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
         keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}",
                                              callback_data=f"off_{grupo_id}")])
     keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="off_confirmar")])
+    keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data="off_retroceder")])
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None}
@@ -270,9 +273,11 @@ def handle_grupos(update, context):
 
     estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
                         for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
+    keyboard = [[InlineKeyboardButton("🔙 Retroceder", callback_data="grupos_retroceder")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     bot.send_message(chat_id=chat_id,
                      text=f"📋 *Estado de los grupos* 🌟\n{estado}",
-                     parse_mode='Markdown')
+                     reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /pendientes con botones
 def handle_pendientes(update, context):
@@ -353,19 +358,23 @@ def button_handler(update, context):
     data = query.data
     chat_id = query.message.chat_id
     mensaje_id = query.message.message_id
+    current_text = query.message.text
+    current_markup = query.message.reply_markup
 
     # Manejo de /on y /off
     if data.startswith("on_") or data.startswith("off_"):
         accion, grupo_id = data.split("_")
         grupo_id = int(grupo_id)
         if chat_id in grupos_seleccionados and mensaje_id == grupos_seleccionados[chat_id]["mensaje_id"]:
+            title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
             if grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 grupos_seleccionados[chat_id]["grupos"].remove(grupo_id)
-                texto = query.message.text.replace(f"\n{'🟢' if accion == 'on' else '🔴'} {grupos_estados[grupo_id]['title']} seleccionado.", "")
+                texto = current_text.replace(f"\n{'🟢' if accion == 'on' else '🔴'} {title} seleccionado.", "")
             else:
                 grupos_seleccionados[chat_id]["grupos"].add(grupo_id)
-                texto = query.message.text + f"\n{'🟢' if accion == 'on' else '🔴'} {grupos_estados[grupo_id]['title']} seleccionado."
-            query.edit_message_text(text=texto, reply_markup=query.message.reply_markup, parse_mode='Markdown')
+                texto = current_text + f"\n{'🟢' if accion == 'on' else '🔴'} {title} seleccionado."
+            if texto != current_text or str(current_markup) != str(reply_markup):
+                query.edit_message_text(text=texto, reply_markup=current_markup, parse_mode='Markdown')
         return
 
     if data == "on_confirmar" or data == "off_confirmar":
@@ -386,10 +395,10 @@ def button_handler(update, context):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         grupos = "\n".join([grupos_estados[gid]["title"] for gid in grupos_seleccionados[chat_id]["grupos"]])
-        query.edit_message_text(
-            text=f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n"
-                 f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?",
-            reply_markup=reply_markup, parse_mode='Markdown')
+        texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n" \
+                f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?"
+        if texto != current_text or str(reply_markup) != str(current_markup):
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data.startswith("on_notificar_") or data.startswith("off_notificar_"):
@@ -418,20 +427,32 @@ def button_handler(update, context):
         elif decision == "retroceder":
             keyboard = []
             for grupo_id in grupos_activos:
-                title = grupos_estados.get(grupo_id, {}).get("title", "Grupo desconocido")
+                title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
                 seleccionado = grupo_id in grupos_seleccionados[chat_id]["grupos"]
                 keyboard.append([InlineKeyboardButton(f"{title} {'🟢' if grupos_estados.get(grupo_id, {}).get('activo', True) else '🔴'}{' ✅' if seleccionado else ''}",
                                                      callback_data=f"{accion}_{grupo_id}")])
             keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"{accion}_confirmar")])
+            keyboard.append([InlineKeyboardButton("🔙 Retroceder", callback_data=f"{accion}_retroceder")])
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* 🌟\nSelecciona los grupos (puedes elegir varios):"
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 grupos_estados[grupo_id]["activo"] = not (accion == "on")  # Revertir cambios
+            if texto != current_text or str(reply_markup) != str(current_markup):
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     # Manejo de /pendientes
     if data.startswith("pend_"):
+        if data == "pend_regresar":
+            keyboard = []
+            for ticket, info in sorted(peticiones_registradas.items(), key=lambda x: x[0]):
+                keyboard.append([InlineKeyboardButton(f"#{ticket} - {info['username']} ({info['chat_title']})",
+                                                     callback_data=f"pend_{ticket}")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:"
+            if texto != current_text or str(reply_markup) != str(current_markup):
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            return
         ticket = int(data.split("_")[1])
         if ticket not in peticiones_registradas:
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟")
@@ -453,7 +474,8 @@ def button_handler(update, context):
             f"🕒 *Fecha:* {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}\n"
             "Selecciona una acción:"
         )
-        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        if texto != current_text or str(reply_markup) != str(current_markup):
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data.startswith("pend_") and "_" in data.split("_", 2)[2]:
@@ -498,22 +520,11 @@ def button_handler(update, context):
                 [InlineKeyboardButton("🔙 Regresar", callback_data=f"pend_{ticket}")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            query.edit_message_text(
-                text=f"📢 *Notificar Ticket #{ticket}* 🌟\nEscribe el mensaje a enviar a {username_escaped} (responde a este mensaje):",
-                reply_markup=reply_markup, parse_mode='Markdown')
+            texto = f"📢 *Notificar Ticket #{ticket}* 🌟\nEscribe el mensaje a enviar a {username_escaped} (responde a este mensaje):"
+            if texto != current_text or str(reply_markup) != str(current_markup):
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             context.user_data["notificar_ticket"] = ticket
             return
-
-    if data == "pend_regresar":
-        keyboard = []
-        for ticket, info in sorted(peticiones_registradas.items(), key=lambda x: x[0]):
-            keyboard.append([InlineKeyboardButton(f"#{ticket} - {info['username']} ({info['chat_title']})",
-                                                 callback_data=f"pend_{ticket}")])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(
-            text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:",
-            reply_markup=reply_markup, parse_mode='Markdown')
-        return
 
     # Manejo de /eliminar
     if data.startswith("eliminar_"):
@@ -524,9 +535,9 @@ def button_handler(update, context):
             [InlineKeyboardButton("🗑️ Eliminada", callback_data=f"eliminar_{ticket}_eliminada")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(
-            text=f"🗑️ *Eliminar Ticket #{ticket}* 🌟\nSelecciona el estado:",
-            reply_markup=reply_markup, parse_mode='Markdown')
+        texto = f"🗑️ *Eliminar Ticket #{ticket}* 🌟\nSelecciona el estado:"
+        if texto != current_text or str(reply_markup) != str(current_markup):
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
     elif data.startswith("eliminar_") and "_" in data.split("_", 2)[2]:
         ticket, estado = data.split("_")[1:]
@@ -563,6 +574,16 @@ def button_handler(update, context):
 
         del peticiones_registradas[ticket]
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como {estado}.* 🌟", parse_mode='Markdown')
+
+    # Retroceder para /on, /off, /grupos
+    if data in ["on_retroceder", "off_retroceder", "grupos_retroceder"]:
+        if data == "on_retroceder":
+            handle_on(update, context)
+        elif data == "off_retroceder":
+            handle_off(update, context)
+        elif data == "grupos_retroceder":
+            handle_grupos(update, context)
+        return
 
 # Comando /subido
 def handle_subido(update, context):
