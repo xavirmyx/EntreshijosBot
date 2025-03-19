@@ -84,8 +84,7 @@ def update_grupos_estados(chat_id, title=None):
 # Función para manejar mensajes
 def handle_message(update, context):
     if not update.message:
-        logger.warning("Mensaje recibido es None")
-        return
+        return  # Ignorar sin loggear advertencia para callbacks
 
     update_id = update.update_id
     if update_id in procesado:
@@ -192,9 +191,8 @@ def handle_message(update, context):
 
 # Comando /on con botones
 def handle_on(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /on recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -224,9 +222,8 @@ def handle_on(update, context):
 
 # Comando /off con botones
 def handle_off(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /off recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -256,9 +253,8 @@ def handle_off(update, context):
 
 # Comando /grupos
 def handle_grupos(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /grupos recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -281,9 +277,8 @@ def handle_grupos(update, context):
 
 # Comando /pendientes con botones
 def handle_pendientes(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /pendientes recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -308,9 +303,8 @@ def handle_pendientes(update, context):
 
 # Comando /eliminar con botones
 def handle_eliminar(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /eliminar recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -335,9 +329,8 @@ def handle_eliminar(update, context):
 
 # Comando /ping
 def handle_ping(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /ping recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -352,7 +345,6 @@ def handle_ping(update, context):
 def button_handler(update, context):
     query = update.callback_query
     if not query:
-        logger.warning("CallbackQuery recibido es None")
         return
     query.answer()
     data = query.data
@@ -379,8 +371,8 @@ def button_handler(update, context):
             return
 
         accion, grupo_id_str = data.split("_", 1)
-        if grupo_id_str == "confirmar" or grupo_id_str == "retroceder":
-            logger.error(f"Intento de conversión inválida de grupo_id: {grupo_id_str}")
+        if grupo_id_str in ["confirmar", "retroceder"]:
+            logger.warning(f"Ignorando conversión inválida de grupo_id: {grupo_id_str}")
             return
 
         try:
@@ -420,9 +412,11 @@ def button_handler(update, context):
                 del grupos_seleccionados[chat_id]
             return
 
+        # Aplicar el cambio de estado a los grupos seleccionados
         for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
             grupos_estados[grupo_id]["activo"] = (accion == "on")
 
+        # Preparar el mensaje de confirmación con opciones de notificación
         keyboard = [
             [InlineKeyboardButton("✅ Sí", callback_data=f"{accion}_notificar_sí")],
             [InlineKeyboardButton("❌ No", callback_data=f"{accion}_notificar_no")],
@@ -476,7 +470,7 @@ def button_handler(update, context):
                 query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
-    # Manejo de /pendientes
+    # Manejo de /pendientes (sin cambios)
     if data.startswith("pend_"):
         if data == "pend_regresar":
             keyboard = []
@@ -521,7 +515,7 @@ def button_handler(update, context):
                 query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        # Procesamiento de acciones (subido, denegado, eliminar, notificar)
+        # Procesamiento de acciones (sin cambios)
         try:
             accion = data.split("_")[2]
         except IndexError:
@@ -573,7 +567,7 @@ def button_handler(update, context):
             context.user_data["notificar_ticket"] = ticket
             return
 
-    # Manejo de /eliminar
+    # Manejo de /eliminar (sin cambios)
     if data.startswith("eliminar_"):
         try:
             ticket = int(data.split("_")[1])
@@ -637,9 +631,8 @@ def button_handler(update, context):
 
 # Comando /subido
 def handle_subido(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /subido recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -666,9 +659,8 @@ def handle_subido(update, context):
 
 # Comando /denegado
 def handle_denegado(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /denegado recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -695,9 +687,8 @@ def handle_denegado(update, context):
 
 # Comando /notificar (manual)
 def handle_notificar(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /notificar recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -719,7 +710,7 @@ def handle_notificar(update, context):
 
 # Manejo de respuestas para notificaciones desde /pendientes
 def handle_notificar_respuesta(update, context):
-    if not update or not update.message or "notificar_ticket" not in context.user_data:
+    if not update.message or "notificar_ticket" not in context.user_data:
         return
 
     message = update.message
@@ -745,9 +736,8 @@ def handle_notificar_respuesta(update, context):
 
 # Comando /menu
 def handle_menu(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /menu recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -776,9 +766,8 @@ def handle_menu(update, context):
 
 # Comando /ayuda
 def handle_ayuda(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /ayuda recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
@@ -793,9 +782,8 @@ def handle_ayuda(update, context):
 
 # Comando /estado
 def handle_estado(update, context):
-    if not update or not update.message:
-        logger.warning("Mensaje /estado recibido es None")
-        return
+    if not update.message:
+        return  # Ignorar sin loggear advertencia para callbacks
 
     message = update.message
     chat_id = message.chat_id
