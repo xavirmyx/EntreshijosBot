@@ -34,10 +34,10 @@ admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, para e
 # Lista de grupos predefinidos donde actúa el bot
 GRUPOS_PREDEFINIDOS = [
     -1002350263641,  # Biblioteca EnTresHijos
-    -1001886336551,
-    -1001918569531,
-    -1002034968062,
-    -1002348662107
+    -1001886336551,  # Biblioteca Privada EntresHijos
+    -1001918569531,  # SALA DE ENTRESHIJOS.📽*/
+    -1002034968062,  # ᏉᏗᏒᎥᎧᏕ 🖤
+    -1002348662107,  # GLOBAL SPORTS STREAM
 ]
 
 # Inicializar grupos activos y estados
@@ -73,13 +73,13 @@ def escape_markdown(text, preserve_username=False):
     return text
 
 # Actualizar estado de grupos
-def update_grupos_estados(chat_id, title):
+def update_grupos_estados(chat_id, title=None):
     if chat_id not in grupos_estados:
-        grupos_estados[chat_id] = {"activo": True, "title": title}
+        grupos_estados[chat_id] = {"activo": True, "title": title if title else f"Grupo {chat_id}"}
         grupos_activos.add(chat_id)
-    else:
+    elif title and grupos_estados[chat_id]["title"] == f"Grupo {chat_id}":
         grupos_estados[chat_id]["title"] = title
-    logger.info(f"Grupo registrado/actualizado: {chat_id} - {title}")
+    logger.info(f"Grupo registrado/actualizado: {chat_id} - {grupos_estados[chat_id]['title']}")
 
 # Función para manejar mensajes
 def handle_message(update, context):
@@ -177,7 +177,7 @@ def handle_message(update, context):
             f"🏠 *Grupo:* {chat_title_escaped}  \n"
             f"📅 *Fecha:* {timestamp}  \n"
             f"📝 *Mensaje:* {message_text_escaped}  \n"
-            f"🎫 *Ticket:* {ticket_number} se te ha asignado  \n"
+            f"     *Ticket:* {ticket_number} se te ha asignado  \n"
             "🔹 *Consulta tu solicitud:*  \n"
             "🔍 /estado {ticket_number} – Ver estado 📌  \n"
             "📖 /ayuda – Más información ℹ️  \n\n"
@@ -360,6 +360,16 @@ def button_handler(update, context):
     mensaje_id = query.message.message_id
     current_text = query.message.text
     current_markup = query.message.reply_markup
+
+    # Manejo de Retroceder para /on, /off, /grupos
+    if data in ["on_retroceder", "off_retroceder", "grupos_retroceder"]:
+        if data == "on_retroceder":
+            handle_on(update, context)
+        elif data == "off_retroceder":
+            handle_off(update, context)
+        elif data == "grupos_retroceder":
+            handle_grupos(update, context)
+        return
 
     # Manejo de /on y /off
     if data.startswith("on_") or data.startswith("off_"):
@@ -574,16 +584,6 @@ def button_handler(update, context):
 
         del peticiones_registradas[ticket]
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como {estado}.* 🌟", parse_mode='Markdown')
-
-    # Retroceder para /on, /off, /grupos
-    if data in ["on_retroceder", "off_retroceder", "grupos_retroceder"]:
-        if data == "on_retroceder":
-            handle_on(update, context)
-        elif data == "off_retroceder":
-            handle_off(update, context)
-        elif data == "grupos_retroceder":
-            handle_grupos(update, context)
-        return
 
 # Comando /subido
 def handle_subido(update, context):
