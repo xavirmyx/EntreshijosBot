@@ -275,10 +275,11 @@ def handle_grupos(update, context):
                          text=f"📋 *Estado de los grupos* 🌟\n{estado}",
                          reply_markup=reply_markup, parse_mode='Markdown')
     elif update.callback_query:
-        update.callback_query.edit_message_text(
-            text=f"📋 *Estado de los grupos* 🌟\n{estado}",
-            reply_markup=reply_markup, parse_mode='Markdown'
-        )
+        # Eliminar el mensaje actual y enviar uno nuevo para evitar el error "Message is not modified"
+        update.callback_query.message.delete()
+        bot.send_message(chat_id=chat_id,
+                         text=f"📋 *Estado de los grupos* 🌟\n{estado}",
+                         reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /historial
 def handle_historial(update, context):
@@ -403,8 +404,7 @@ def button_handler(update, context):
     # Manejo de Retroceder para /grupos
     if data == "grupos_retroceder":
         handle_grupos(update, context)
-        query.message.delete()
-        return
+        return  # handle_grupos ya maneja la eliminación y recreación del mensaje
 
     # Si no está relacionado con /on o /off, no necesitamos grupos_seleccionados
     if not data.startswith("select_") and not data.startswith("confirm_") and not data.startswith("notify_") and not data.startswith("back_"):
