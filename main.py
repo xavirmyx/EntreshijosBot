@@ -41,6 +41,15 @@ GRUPOS_PREDEFINIDOS = {
     -1002348662107: "GLOBAL SPORTS STREAM",
 }
 
+# Mapeo de grupos a canales específicos para respuestas de peticiones
+CANALES_PETICIONES = {
+    -1002350263641: -1002350263641,  # Biblioteca EnTresHijos -> https://t.me/c/2350263641/19
+    -1001886336551: -1001886336551,  # Biblioteca Privada EntresHijos -> https://t.me/c/1886336551/652
+    -1001918569531: -1001918569531,  # SALA DE ENTRESHIJOS.📽 -> https://t.me/c/1918569531/228298
+    -1002034968062: -1002034968062,  # ᏉᏗᏒᎥᎧᏕ 🖤 -> https://t.me/c/2034968062/157047
+    -1002348662107: -1002348662107,  # GLOBAL SPORTS STREAM -> https://t.me/c/2348662107/53411
+}
+
 # Inicializar grupos activos y estados con nombres reales
 grupos_activos = set(GRUPOS_PREDEFINIDOS.keys())
 grupos_estados = {gid: {"activo": True, "title": title} for gid, title in GRUPOS_PREDEFINIDOS.items()}
@@ -129,7 +138,7 @@ def handle_message(update, context):
             bot.send_message(chat_id=chat_id, text=limite_message)
             warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
             bot.send_message(chat_id=chat_id, text=warn_message)
-            logger.info(f"Límite excedido por {username}, advertencia enviada")
+            logger.info(f"Límite excedido por {username}, advertencia envi Accession Deniedada")
             return
 
         global ticket_counter
@@ -183,12 +192,14 @@ def handle_message(update, context):
             "📖 /ayuda – Más información ℹ️  \n\n"
             "⏳ *Tu solicitud será atendida pronto. ¡Gracias por tu paciencia!* 🙌"
         )
+        # Enviar la confirmación al canal correspondiente según el grupo
+        canal_id = CANALES_PETICIONES.get(chat_id, chat_id)  # Si no hay canal definido, usa el chat_id original
         try:
-            bot.send_message(chat_id=chat_id, text=confirmacion_message, parse_mode='Markdown')
-            logger.info(f"Confirmación enviada a {username}")
+            bot.send_message(chat_id=canal_id, text=confirmacion_message, parse_mode='Markdown')
+            logger.info(f"Confirmación enviada a {username} en el canal {canal_id}")
         except telegram.error.BadRequest as e:
-            bot.send_message(chat_id=chat_id, text=confirmacion_message.replace('*', ''))
-            logger.error(f"Error al enviar confirmación con Markdown: {str(e)}")
+            bot.send_message(chat_id=canal_id, text=confirmacion_message.replace('*', ''))
+            logger.error(f"Error al enviar confirmación con Markdown al canal {canal_id}: {str(e)}")
 
 # Comando /on con botones
 def handle_on(update, context):
