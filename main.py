@@ -8,6 +8,8 @@ import os
 import random
 import logging
 import psycopg2
+from psycopg2 import OperationalError
+import time
 
 # Configura tu token, grupo y URL del webhook usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
@@ -25,14 +27,24 @@ app = Flask(__name__)
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
 
-# Conexión a Supabase
+# Conexión a Supabase con reintentos
 def get_db_connection():
-    try:
-        conn = psycopg2.connect(os.getenv('SUPABASE_DB'))
-        return conn
-    except Exception as e:
-        logger.error(f"Error al conectar a Supabase: {str(e)}")
-        return None
+    max_retries = 3
+    retry_delay = 5  # segundos
+    for attempt in range(max_retries):
+        try:
+            conn = psycopg2.connect(
+                os.getenv('SUPABASE_DB'),
+                connect_timeout=10  # Timeout de 10 segundos
+            )
+            return conn
+        except OperationalError as e:
+            logger.error(f"Intento {attempt + 1}/{max_retries} - Error al conectar a Supabase: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                logger.error("No se pudo conectar a Supabase tras varios intentos.")
+                return None
 
 # Contador inicial para tickets
 ticket_counter = 150
