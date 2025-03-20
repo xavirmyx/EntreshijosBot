@@ -254,7 +254,7 @@ def handle_message(update, context):
                 "Por favor, usa los comandos correctos: */solicito*, *#solicito*, */peticion* o *#peticion*. "
                 "Consulta /ayuda para más información. 🌟\n"
                 "📋 *Equipo de Administración EnTresHijos*"
-            )
+        )
 
         try:
             bot.send_message(
@@ -1009,6 +1009,17 @@ dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 dispatcher.add_handler(MessageHandler(Filters.reply & Filters.text & ~Filters.command, handle_notificar_respuesta))
 
+# Función para configurar el webhook al iniciar
+def set_webhook():
+    try:
+        # Eliminar cualquier webhook existente
+        bot.delete_webhook()
+        # Configurar el nuevo webhook
+        bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook configurado correctamente en {WEBHOOK_URL}")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Error al configurar el webhook: {str(e)}")
+
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -1031,6 +1042,11 @@ def webhook():
 def health_check():
     return "Bot de Entreshijos está activo! 🌟", 200
 
-if __name__ == '__main__':
-    logger.info("Iniciando bot en modo local")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+# Configurar el webhook al iniciar la aplicación
+set_webhook()
+
+# No se necesita app.run() porque gunicorn lo manejará en Render
+# Para desarrollo local, puedes descomentar lo siguiente:
+# if __name__ == '__main__':
+#     logger.info("Iniciando bot en modo local")
+#     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
