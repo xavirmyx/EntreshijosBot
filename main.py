@@ -7,9 +7,6 @@ import pytz
 import os
 import random
 import logging
-import psycopg2
-from psycopg2 import OperationalError
-import time
 
 # Configura tu token, grupo y URL del webhook usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
@@ -27,33 +24,14 @@ app = Flask(__name__)
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
 
-# Conexión a Supabase con reintentos y forzando IPv4
-def get_db_connection():
-    max_retries = 3
-    retry_delay = 5  # segundos
-    for attempt in range(max_retries):
-        try:
-            conn = psycopg2.connect(
-                dbname="postgres",
-                user="postgres",
-                password="-RAPX-U2Y.iUvLq",
-                host="34.77.162.2",  # IP fija de db.fwvhrbfoiogtkmgzddhk.supabase.co para forzar IPv4
-                port="5432",
-                connect_timeout=10  # Timeout de 10 segundos
-            )
-            return conn
-        except OperationalError as e:
-            logger.error(f"Intento {attempt + 1}/{max_retries} - Error al conectar a Supabase: {str(e)}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-            else:
-                logger.error("No se pudo conectar a Supabase tras varios intentos.")
-                return None
-
-# Contador inicial para tickets
-ticket_counter = 150
+# Diccionarios para almacenamiento en memoria
+ticket_counter = 150  # Comienza en 150
+peticiones_por_usuario = {}  # {user_id: {"count": X, "chat_id": Y, "username": Z}}
+peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T, "chat_title": V}}
+historial_solicitudes = {}   # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "chat_title": V, "estado": "subido/denegado/eliminado/notificado", "fecha_gestion": T, "admin_username": "@admin"}}
 procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
-admin_ids = set([12345678])  # Lista de IDs de administradores
+admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, para excepciones en límites)
+peticiones_incorrectas = {}  # {user_id: [{"timestamp": T, "chat_id": X}]}
 
 # Lista de grupos predefinidos donde actúa el bot con sus nombres reales
 GRUPOS_PREDEFINIDOS = {
@@ -114,168 +92,10 @@ def update_grupos_estados(chat_id, title=None):
         grupos_estados[chat_id]["title"] = title
     logger.info(f"Grupo registrado/actualizado: {chat_id} - {grupos_estados[chat_id]['title']}")
 
-# Funciones para Supabase
-def save_peticion_registrada(ticket, chat_id, username, message_text, message_id, timestamp, chat_title):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO peticiones_registradas (ticket, chat_id, username, message_text, message_id, timestamp, chat_title)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (ticket) DO NOTHING
-            """, (ticket, chat_id, username, message_text, message_id, timestamp.strftime('%d/%m/%Y %H:%M:%S'), chat_title))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error al guardar petición registrada: {str(e)}")
-        finally:
-            conn.close()
-
-def save_historial_solicitud(ticket, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO historial_solicitudes (ticket, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (ticket) DO NOTHING
-            """, (ticket, chat_id, username, message_text, chat_title, estado, fecha_gestion.strftime('%d/%m/%Y %H:%M:%S'), admin_username))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error al guardar historial: {str(e)}")
-        finally:
-            conn.close()
-
-def update_peticiones_usuario(user_id, count, chat_id, username):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO peticiones_por_usuario (user_id, count, chat_id, username)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (user_id) DO UPDATE SET count = %s, chat_id = %s, username = %s
-            """, (user_id, count, chat_id, username, count, chat_id, username))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error al actualizar peticiones por usuario: {str(e)}")
-        finally:
-            conn.close()
-
-def save_peticion_incorrecta(user_id, timestamp, chat_id):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO peticiones_incorrectas (user_id, timestamp, chat_id)
-                VALUES (%s, %s, %s)
-            """, (user_id, timestamp.strftime('%d/%m/%Y %H:%M:%S'), chat_id))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error al guardar petición incorrecta: {str(e)}")
-        finally:
-            conn.close()
-
-def get_peticiones_usuario(user_id):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT count, chat_id, username FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
-            result = c.fetchone()
-            return {"count": result[0], "chat_id": result[1], "username": result[2]} if result else None
-        except Exception as e:
-            logger.error(f"Error al obtener peticiones por usuario: {str(e)}")
-            return None
-        finally:
-            conn.close()
-    return None
-
-def get_peticiones_incorrectas(user_id, cutoff_time):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("""
-                SELECT timestamp, chat_id FROM peticiones_incorrectas
-                WHERE user_id = %s AND timestamp > %s
-            """, (user_id, cutoff_time.strftime('%d/%m/%Y %H:%M:%S')))
-            results = c.fetchall()
-            return [{"timestamp": r[0], "chat_id": r[1]} for r in results]
-        except Exception as e:
-            logger.error(f"Error al obtener peticiones incorrectas: {str(e)}")
-            return []
-        finally:
-            conn.close()
-    return []
-
-def get_peticion_registrada(ticket):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT * FROM peticiones_registradas WHERE ticket = %s", (ticket,))
-            result = c.fetchone()
-            if result:
-                return {
-                    "chat_id": result[1],
-                    "username": result[2],
-                    "message_text": result[3],
-                    "message_id": result[4],
-                    "timestamp": datetime.strptime(result[5], '%d/%m/%Y %H:%M:%S').replace(tzinfo=pytz.UTC),
-                    "chat_title": result[6]
-                }
-            return None
-        except Exception as e:
-            logger.error(f"Error al obtener petición registrada: {str(e)}")
-            return None
-        finally:
-            conn.close()
-    return None
-
-def get_historial_solicitud(ticket):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT * FROM historial_solicitudes WHERE ticket = %s", (ticket,))
-            result = c.fetchone()
-            if result:
-                return {
-                    "chat_id": result[1],
-                    "username": result[2],
-                    "message_text": result[3],
-                    "chat_title": result[4],
-                    "estado": result[5],
-                    "fecha_gestion": datetime.strptime(result[6], '%d/%m/%Y %H:%M:%S').replace(tzinfo=pytz.UTC),
-                    "admin_username": result[7]
-                }
-            return None
-        except Exception as e:
-            logger.error(f"Error al obtener historial solicitud: {str(e)}")
-            return None
-        finally:
-            conn.close()
-    return None
-
-def delete_peticion_registrada(ticket):
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("DELETE FROM peticiones_registradas WHERE ticket = %s", (ticket,))
-            conn.commit()
-        except Exception as e:
-            logger.error(f"Error al eliminar petición registrada: {str(e)}")
-        finally:
-            conn.close()
-
 # Función para manejar mensajes
 def handle_message(update, context):
     if not update.message:
-        return
+        return  # Ignorar silenciosamente para callbacks
 
     update_id = update.update_id
     if update_id in procesado:
@@ -291,6 +111,7 @@ def handle_message(update, context):
     chat_title = message.chat.title or 'Chat privado'
     canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
 
+    # Registrar cualquier grupo donde el bot reciba un mensaje
     update_grupos_estados(chat_id, chat_title)
 
     timestamp = datetime.now(pytz.timezone('UTC'))
@@ -299,6 +120,7 @@ def handle_message(update, context):
     chat_title_escaped = escape_markdown(chat_title)
     message_text_escaped = escape_markdown(message_text)
 
+    # Detección de solicitudes válidas
     if any(cmd in message_text.lower() for cmd in ['#solicito', '/solicito', '#peticion', '/peticion']):
         logger.info(f"Solicitud recibida de {username} en {chat_title}: {message_text}")
         if not grupos_estados.get(chat_id, {}).get("activo", True):
@@ -314,14 +136,11 @@ def handle_message(update, context):
             logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
-        user_data = get_peticiones_usuario(user_id)
-        if user_data is None:
-            update_peticiones_usuario(user_id, 0, chat_id, username)
-            user_data = {"count": 0, "chat_id": chat_id, "username": username}
-        user_data["count"] += 1
-        update_peticiones_usuario(user_id, user_data["count"], chat_id, username)
+        if user_id not in peticiones_por_usuario:
+            peticiones_por_usuario[user_id] = {"count": 0, "chat_id": chat_id, "username": username}
+        peticiones_por_usuario[user_id]["count"] += 1
 
-        if user_data["count"] > 2 and user_id not in admin_ids:
+        if peticiones_por_usuario[user_id]["count"] > 2 and user_id not in admin_ids:
             limite_message = (
                 f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
             )
@@ -348,7 +167,7 @@ def handle_message(update, context):
             "📬 *Nueva solicitud recibida* 🌟\n"
             f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
             f"🎫 *Ticket:* #{ticket_number}\n"
-            f"📊 *Petición:* {user_data['count']}/2\n"
+            f"📊 *Petición:* {peticiones_por_usuario.get(user_id, {'count': 1})['count']}/2\n"
             f"📝 *Mensaje:* {message_text_escaped}\n"
             f"🏠 *Grupo:* {chat_title_escaped}\n"
             f"🕒 *Fecha:* {timestamp_str}\n"
@@ -356,11 +175,25 @@ def handle_message(update, context):
         )
         try:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
-            save_peticion_registrada(ticket_number, chat_id, username, message_text, sent_message.message_id, timestamp, chat_title)
+            peticiones_registradas[ticket_number] = {
+                "chat_id": chat_id,
+                "username": username,
+                "message_text": message_text,
+                "message_id": sent_message.message_id,
+                "timestamp": timestamp,
+                "chat_title": chat_title
+            }
             logger.info(f"Solicitud #{ticket_number} enviada al grupo destino")
         except telegram.error.BadRequest as e:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message.replace('*', ''))
-            save_peticion_registrada(ticket_number, chat_id, username, message_text, sent_message.message_id, timestamp, chat_title)
+            peticiones_registradas[ticket_number] = {
+                "chat_id": chat_id,
+                "username": username,
+                "message_text": message_text,
+                "message_id": sent_message.message_id,
+                "timestamp": timestamp,
+                "chat_title": chat_title
+            }
             logger.error(f"Error al enviar con Markdown: {str(e)}")
 
         confirmacion_message = (
@@ -392,11 +225,21 @@ def handle_message(update, context):
                 message_thread_id=canal_info["thread_id"]
             )
             logger.error(f"Error al enviar confirmación con Markdown a {canal_info['chat_id']}: {str(e)}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error de Telegram al enviar a {canal_info['chat_id']} thread {canal_info['thread_id']}: {str(e)}")
 
+    # Detección de solicitudes incorrectas
     elif any(word in message_text.lower() for word in ['solicito', 'peticion']) and chat_id in CANALES_PETICIONES:
-        save_peticion_incorrecta(user_id, timestamp, chat_id)
+        if user_id not in peticiones_incorrectas:
+            peticiones_incorrectas[user_id] = []
+
+        # Registrar intento incorrecto
+        peticiones_incorrectas[user_id].append({"timestamp": timestamp, "chat_id": chat_id})
+
+        # Filtrar intentos en las últimas 24 horas
         cutoff_time = timestamp - timedelta(hours=24)
-        intentos_recientes = get_peticiones_incorrectas(user_id, cutoff_time)
+        intentos_recientes = [intento for intento in peticiones_incorrectas[user_id] if intento["timestamp"] > cutoff_time]
+        peticiones_incorrectas[user_id] = intentos_recientes
 
         notificacion_incorrecta = (
             f"⚠️ {username_escaped}, tu petición no está formulada correctamente. "
@@ -526,34 +369,30 @@ def handle_historial(update, context):
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT * FROM historial_solicitudes ORDER BY ticket DESC")
-            results = c.fetchall()
-            if not results:
-                bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟")
-                return
-            historial = []
-            for r in results:
-                estado_str = {"subido": "✅ Aceptada", "denegado": "❌ Denegada", "eliminado": "🗑️ Eliminada", "notificado": "📢 Respondida"}.get(r[5], "🔄 Desconocido")
-                historial.append(
-                    f"🎫 *Ticket #{r[0]}* 🌟\n"
-                    f"👤 *Usuario:* {escape_markdown(r[2], True)}\n"
-                    f"📝 *Mensaje:* {escape_markdown(r[3])}\n"
-                    f"🏠 *Grupo:* {escape_markdown(r[4])}\n"
-                    f"📅 *Gestionada:* {r[6]}\n"
-                    f"👥 *Admin:* {r[7]}\n"
-                    f"📌 *Estado:* {estado_str}\n"
-                )
-            historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
-            bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error al obtener historial: {str(e)}")
-            bot.send_message(chat_id=chat_id, text="⚠️ Error al cargar el historial. 🌟")
-        finally:
-            conn.close()
+    if not historial_solicitudes:
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟")
+        return
+
+    solicitudes_ordenadas = sorted(historial_solicitudes.items(), key=lambda x: x[0], reverse=True)
+    historial = []
+    for ticket, info in solicitudes_ordenadas:
+        estado_str = {
+            "subido": "✅ Aceptada",
+            "denegado": "❌ Denegada",
+            "eliminado": "🗑️ Eliminada",
+            "notificado": "📢 Respondida"
+        }.get(info["estado"], "🔄 Desconocido")
+        historial.append(
+            f"🎫 *Ticket #{ticket}* 🌟\n"
+            f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+            f"📅 *Gestionada:* {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
+            f"👥 *Admin:* {info['admin_username']}\n"
+            f"📌 *Estado:* {estado_str}\n"
+        )
+    historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
+    bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
 
 # Comando /pendientes con botones
 def handle_pendientes(update, context):
@@ -567,28 +406,18 @@ def handle_pendientes(update, context):
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT ticket, username, chat_title FROM peticiones_registradas ORDER BY ticket")
-            results = c.fetchall()
-            if not results:
-                bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟")
-                return
-            keyboard = []
-            for ticket, username, chat_title in results:
-                keyboard.append([InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
-                                                     callback_data=f"pend_{ticket}")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            bot.send_message(chat_id=chat_id,
-                             text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:",
-                             reply_markup=reply_markup, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error al obtener pendientes: {str(e)}")
-            bot.send_message(chat_id=chat_id, text="⚠️ Error al cargar pendientes. 🌟")
-        finally:
-            conn.close()
+    if not peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟")
+        return
+
+    keyboard = []
+    for ticket, info in sorted(peticiones_registradas.items(), key=lambda x: x[0]):
+        keyboard.append([InlineKeyboardButton(f"#{ticket} - {info['username']} ({info['chat_title']})",
+                                             callback_data=f"pend_{ticket}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(chat_id=chat_id,
+                     text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:",
+                     reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /eliminar con botones
 def handle_eliminar(update, context):
@@ -602,28 +431,18 @@ def handle_eliminar(update, context):
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT ticket, username FROM peticiones_registradas")
-            results = c.fetchall()
-            if not results:
-                bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes para eliminar. 🌟")
-                return
-            keyboard = []
-            for ticket, username in results:
-                keyboard.append([InlineKeyboardButton(f"Ticket #{ticket} - {username}",
-                                                     callback_data=f"eliminar_{ticket}")])
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            bot.send_message(chat_id=chat_id,
-                             text="🗑️ *Eliminar solicitud* 🌟\nSelecciona el ticket a eliminar:",
-                             reply_markup=reply_markup, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Error al obtener solicitudes para eliminar: {str(e)}")
-            bot.send_message(chat_id=chat_id, text="⚠️ Error al cargar solicitudes. 🌟")
-        finally:
-            conn.close()
+    if not peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes para eliminar. 🌟")
+        return
+
+    keyboard = []
+    for ticket, info in peticiones_registradas.items():
+        keyboard.append([InlineKeyboardButton(f"Ticket #{ticket} - {info['username']}",
+                                             callback_data=f"eliminar_{ticket}")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(chat_id=chat_id,
+                     text="🗑️ *Eliminar solicitud* 🌟\nSelecciona el ticket a eliminar:",
+                     reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /ping
 def handle_ping(update, context):
@@ -763,24 +582,14 @@ def button_handler(update, context):
     if data.startswith("pend_"):
         admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
         if data == "pend_regresar":
-            conn = get_db_connection()
-            if conn:
-                try:
-                    c = conn.cursor()
-                    c.execute("SELECT ticket, username, chat_title FROM peticiones_registradas ORDER BY ticket")
-                    results = c.fetchall()
-                    keyboard = []
-                    for ticket, username, chat_title in results:
-                        keyboard.append([InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
-                                                             callback_data=f"pend_{ticket}")])
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:"
-                    if texto != current_text or str(reply_markup) != str(current_markup):
-                        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                except Exception as e:
-                    logger.error(f"Error al regresar a pendientes: {str(e)}")
-                finally:
-                    conn.close()
+            keyboard = []
+            for ticket, info in sorted(peticiones_registradas.items(), key=lambda x: x[0]):
+                keyboard.append([InlineKeyboardButton(f"#{ticket} - {info['username']} ({info['chat_title']})",
+                                                     callback_data=f"pend_{ticket}")])
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionarla:"
+            if texto != current_text or str(reply_markup) != str(current_markup):
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
         try:
@@ -789,11 +598,11 @@ def button_handler(update, context):
             logger.error(f"Error al procesar ticket en callback pend_: {data}")
             return
 
-        info = get_peticion_registrada(ticket)
-        if not info:
+        if ticket not in peticiones_registradas:
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
 
+        info = peticiones_registradas[ticket]
         if len(data.split("_")) == 2:
             keyboard = [
                 [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
@@ -826,22 +635,31 @@ def button_handler(update, context):
         user_chat_id = info["chat_id"]
         message_id = info["message_id"]
 
-        save_historial_solicitud(ticket, user_chat_id, info["username"], info["message_text"], info["chat_title"],
-                                 accion, datetime.now(pytz.timezone('UTC')), admin_username)
+        historial_solicitudes[ticket] = {
+            "chat_id": user_chat_id,
+            "username": info["username"],
+            "message_text": info["message_text"],
+            "chat_title": info["chat_title"],
+            "estado": accion,
+            "fecha_gestion": datetime.now(pytz.timezone('UTC')),
+            "admin_username": admin_username
+        }
 
         if accion == "subido":
             notificacion = f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉"
             bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown')
             texto = f"✅ *Ticket #{ticket} procesado como subido.* 🌟"
-            delete_peticion_registrada(ticket)
-            query.edit_message_text(text=texto, parse_mode='Markdown')
+            if texto != current_text:
+                query.edit_message_text(text=texto, parse_mode='Markdown')
+            del peticiones_registradas[ticket]
 
         elif accion == "denegado":
             notificacion = f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟"
             bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown')
             texto = f"✅ *Ticket #{ticket} procesado como denegado.* 🌟"
-            delete_peticion_registrada(ticket)
-            query.edit_message_text(text=texto, parse_mode='Markdown')
+            if texto != current_text:
+                query.edit_message_text(text=texto, parse_mode='Markdown')
+            del peticiones_registradas[ticket]
 
         elif accion == "eliminar":
             try:
@@ -852,8 +670,9 @@ def button_handler(update, context):
             notificacion = f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟"
             bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown')
             texto = f"✅ *Ticket #{ticket} procesado como eliminado.* 🌟"
-            delete_peticion_registrada(ticket)
-            query.edit_message_text(text=texto, parse_mode='Markdown')
+            if texto != current_text:
+                query.edit_message_text(text=texto, parse_mode='Markdown')
+            del peticiones_registradas[ticket]
 
         elif accion == "notificar":
             keyboard = [
@@ -874,11 +693,6 @@ def button_handler(update, context):
             logger.error(f"Error al procesar eliminar_ callback: {data}")
             return
 
-        info = get_peticion_registrada(ticket)
-        if not info:
-            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
-            return
-
         if len(data.split("_")) == 2:
             keyboard = [
                 [InlineKeyboardButton("✅ Aprobada", callback_data=f"eliminar_{ticket}_aprobada")],
@@ -897,16 +711,28 @@ def button_handler(update, context):
             logger.error(f"Error al procesar estado en callback eliminar_: {data}")
             return
 
-        user_chat_id = info["chat_id"]
-        username = info["username"]
-        message_text = info["message_text"]
-        message_id = info["message_id"]
+        if ticket not in peticiones_registradas:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+            return
+
+        peticion_info = peticiones_registradas[ticket]
+        user_chat_id = peticion_info["chat_id"]
+        username = peticion_info["username"]
+        message_text = peticion_info["message_text"]
+        message_id = peticion_info["message_id"]
 
         username_escaped = escape_markdown(username, preserve_username=True)
         message_text_escaped = escape_markdown(message_text)
 
-        save_historial_solicitud(ticket, user_chat_id, username, message_text, info["chat_title"],
-                                 "eliminado" if estado == "eliminada" else estado, datetime.now(pytz.timezone('UTC')), admin_username)
+        historial_solicitudes[ticket] = {
+            "chat_id": user_chat_id,
+            "username": username,
+            "message_text": message_text,
+            "chat_title": peticion_info["chat_title"],
+            "estado": "eliminado",
+            "fecha_gestion": datetime.now(pytz.timezone('UTC')),
+            "admin_username": admin_username
+        }
 
         try:
             bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
@@ -916,15 +742,22 @@ def button_handler(update, context):
 
         if estado == "aprobada":
             notificacion = f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido aprobada. 🎉"
+            historial_solicitudes[ticket]["estado"] = "subido"
         elif estado == "denegada":
             notificacion = f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟"
+            historial_solicitudes[ticket]["estado"] = "denegado"
         else:
             notificacion = f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟"
 
-        bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown')
+        try:
+            bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown')
+        except telegram.error.TelegramError as e:
+            bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo notificar a {username_escaped}: {str(e)}. 🌟")
+
         texto = f"✅ *Ticket #{ticket} procesado como {estado}.* 🌟"
-        delete_peticion_registrada(ticket)
-        query.edit_message_text(text=texto, parse_mode='Markdown')
+        if texto != current_text:
+            query.edit_message_text(text=texto, parse_mode='Markdown')
+        del peticiones_registradas[ticket]
 
 # Comando /subido
 def handle_subido(update, context):
@@ -944,17 +777,24 @@ def handle_subido(update, context):
         return
     try:
         ticket = int(args[0])
-        info = get_peticion_registrada(ticket)
-        if not info:
+        if ticket not in peticiones_registradas:
             bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
             return
-        save_historial_solicitud(ticket, info["chat_id"], info["username"], info["message_text"],
-                                 info["chat_title"], "subido", datetime.now(pytz.timezone('UTC')), admin_username)
+        info = peticiones_registradas[ticket]
+        historial_solicitudes[ticket] = {
+            "chat_id": info["chat_id"],
+            "username": info["username"],
+            "message_text": info["message_text"],
+            "chat_title": info["chat_title"],
+            "estado": "subido",
+            "fecha_gestion": datetime.now(pytz.timezone('UTC')),
+            "admin_username": admin_username
+        }
         bot.send_message(chat_id=info["chat_id"],
                          text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) ha sido subida. 🎉",
                          parse_mode='Markdown')
         bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como subido. 🌟")
-        delete_peticion_registrada(ticket)
+        del peticiones_registradas[ticket]
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
 
@@ -976,17 +816,24 @@ def handle_denegado(update, context):
         return
     try:
         ticket = int(args[0])
-        info = get_peticion_registrada(ticket)
-        if not info:
+        if ticket not in peticiones_registradas:
             bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
             return
-        save_historial_solicitud(ticket, info["chat_id"], info["username"], info["message_text"],
-                                 info["chat_title"], "denegado", datetime.now(pytz.timezone('UTC')), admin_username)
+        info = peticiones_registradas[ticket]
+        historial_solicitudes[ticket] = {
+            "chat_id": info["chat_id"],
+            "username": info["username"],
+            "message_text": info["message_text"],
+            "chat_title": info["chat_title"],
+            "estado": "denegado",
+            "fecha_gestion": datetime.now(pytz.timezone('UTC')),
+            "admin_username": admin_username
+        }
         bot.send_message(chat_id=info["chat_id"],
                          text=f"❌ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) ha sido denegada. 🌟",
                          parse_mode='Markdown')
         bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como denegado. 🌟")
-        delete_peticion_registrada(ticket)
+        del peticiones_registradas[ticket]
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
 
@@ -1008,23 +855,12 @@ def handle_notificar(update, context):
         return
     username = args[0]
     msg = " ".join(args[1:])
-    conn = get_db_connection()
-    if conn:
-        try:
-            c = conn.cursor()
-            c.execute("SELECT chat_id FROM peticiones_registradas WHERE username = %s LIMIT 1", (username,))
-            result = c.fetchone()
-            user_chat_id = result[0] if result else None
-            if user_chat_id:
-                bot.send_message(chat_id=user_chat_id, text=f"📢 *Notificación* 🌟\n{msg}", parse_mode='Markdown')
-                bot.send_message(chat_id=chat_id, text=f"✅ Enviada notificación a {username}. 🌟")
-            else:
-                bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado. 🌟")
-        except Exception as e:
-            logger.error(f"Error al notificar: {str(e)}")
-            bot.send_message(chat_id=chat_id, text="⚠️ Error al enviar notificación. 🌟")
-        finally:
-            conn.close()
+    user_chat_id = next((info["chat_id"] for info in peticiones_registradas.values() if info["username"] == username), None)
+    if user_chat_id:
+        bot.send_message(chat_id=user_chat_id, text=f"📢 *Notificación* 🌟\n{msg}", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text=f"✅ Enviada notificación a {username}. 🌟")
+    else:
+        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado. 🌟")
 
 # Manejo de respuestas para notificaciones desde /pendientes
 def handle_notificar_respuesta(update, context):
@@ -1039,17 +875,24 @@ def handle_notificar_respuesta(update, context):
         return
 
     ticket = context.user_data["notificar_ticket"]
-    info = get_peticion_registrada(ticket)
-    if not info:
+    if ticket not in peticiones_registradas:
         bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
         del context.user_data["notificar_ticket"]
         return
 
+    info = peticiones_registradas[ticket]
     username_escaped = escape_markdown(info["username"], True)
     mensaje = message.text
 
-    save_historial_solicitud(ticket, info["chat_id"], info["username"], info["message_text"],
-                             info["chat_title"], "notificado", datetime.now(pytz.timezone('UTC')), admin_username)
+    historial_solicitudes[ticket] = {
+        "chat_id": info["chat_id"],
+        "username": info["username"],
+        "message_text": info["message_text"],
+        "chat_title": info["chat_title"],
+        "estado": "notificado",
+        "fecha_gestion": datetime.now(pytz.timezone('UTC')),
+        "admin_username": admin_username
+    }
 
     bot.send_message(chat_id=info["chat_id"],
                      text=f"📢 *Notificación* 🌟\n{mensaje}",
@@ -1119,27 +962,31 @@ def handle_estado(update, context):
         return
     try:
         ticket = int(args[0])
-        info = get_peticion_registrada(ticket)
-        if info:
+        if ticket in peticiones_registradas:
+            info = peticiones_registradas[ticket]
             estado_message = (
                 f"📋 *Estado* 🌟\n"
                 f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
                 f"Estado: Pendiente ⏳\n"
                 f"🕒 Enviada: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}"
             )
+        elif ticket in historial_solicitudes:
+            info = historial_solicitudes[ticket]
+            estado_str = {
+                "subido": "✅ Aceptada",
+                "denegado": "❌ Denegada",
+                "eliminado": "🗑️ Eliminada",
+                "notificado": "📢 Respondida"
+            }.get(info["estado"], "🔄 Desconocido")
+            estado_message = (
+                f"📋 *Estado* 🌟\n"
+                f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
+                f"Estado: {estado_str}\n"
+                f"🕒 Gestionada: {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"👥 Admin: {info['admin_username']}"
+            )
         else:
-            hist_info = get_historial_solicitud(ticket)
-            if hist_info:
-                estado_str = {"subido": "✅ Aceptada", "denegado": "❌ Denegada", "eliminado": "🗑️ Eliminada", "notificado": "📢 Respondida"}.get(hist_info["estado"], "🔄 Desconocido")
-                estado_message = (
-                    f"📋 *Estado* 🌟\n"
-                    f"Ticket #{ticket}: {escape_markdown(hist_info['message_text'])}\n"
-                    f"Estado: {estado_str}\n"
-                    f"🕒 Gestionada: {hist_info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-                    f"👥 Admin: {hist_info['admin_username']}"
-                )
-            else:
-                estado_message = f"📋 *Estado* 🌟\nTicket #{ticket}: No encontrado. 🔍"
+            estado_message = f"📋 *Estado* 🌟\nTicket #{ticket}: No encontrado. 🔍"
         bot.send_message(chat_id=chat_id, text=estado_message, parse_mode='Markdown')
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
