@@ -41,13 +41,13 @@ GRUPOS_PREDEFINIDOS = {
     -1002348662107: "GLOBAL SPORTS STREAM",
 }
 
-# Mapeo de grupos a canales específicos para respuestas de peticiones
+# Mapeo de grupos a canales/temas específicos para respuestas de peticiones
 CANALES_PETICIONES = {
-    -1002350263641: -1002350263641,  # Biblioteca EnTresHijos -> https://t.me/c/2350263641/19
-    -1001886336551: -1001886336551,  # Biblioteca Privada EntresHijos -> https://t.me/c/1886336551/652
-    -1001918569531: -1001918569531,  # SALA DE ENTRESHIJOS.📽 -> https://t.me/c/1918569531/228298
-    -1002034968062: -1002034968062,  # ᏉᏗᏒᎥᎧᏕ 🖤 -> https://t.me/c/2034968062/157047
-    -1002348662107: -1002348662107,  # GLOBAL SPORTS STREAM -> https://t.me/c/2348662107/53411
+    -1002350263641: {"chat_id": -1002350263641, "thread_id": 19},     # https://t.me/c/2350263641/19
+    -1001886336551: {"chat_id": -1001886336551, "thread_id": 652},    # https://t.me/c/1886336551/652
+    -1001918569531: {"chat_id": -1001918569531, "thread_id": 228298}, # https://t.me/c/1918569531/228298
+    -1002034968062: {"chat_id": -1002034968062, "thread_id": 157047}, # https://t.me/c/2034968062/157047
+    -1002348662107: {"chat_id": -1002348662107, "thread_id": 53411},  # https://t.me/c/2348662107/53411
 }
 
 # Inicializar grupos activos y estados con nombres reales
@@ -138,7 +138,7 @@ def handle_message(update, context):
             bot.send_message(chat_id=chat_id, text=limite_message)
             warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
             bot.send_message(chat_id=chat_id, text=warn_message)
-            logger.info(f"Límite excedido por {username}, advertencia envi Accession Deniedada")
+            logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
 
         global ticket_counter
@@ -192,14 +192,25 @@ def handle_message(update, context):
             "📖 /ayuda – Más información ℹ️  \n\n"
             "⏳ *Tu solicitud será atendida pronto. ¡Gracias por tu paciencia!* 🙌"
         )
-        # Enviar la confirmación al canal correspondiente según el grupo
-        canal_id = CANALES_PETICIONES.get(chat_id, chat_id)  # Si no hay canal definido, usa el chat_id original
+        # Enviar la confirmación al canal/tema correspondiente según el grupo
+        canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
         try:
-            bot.send_message(chat_id=canal_id, text=confirmacion_message, parse_mode='Markdown')
-            logger.info(f"Confirmación enviada a {username} en el canal {canal_id}")
+            bot.send_message(
+                chat_id=canal_info["chat_id"],
+                text=confirmacion_message,
+                parse_mode='Markdown',
+                message_thread_id=canal_info["thread_id"]
+            )
+            logger.info(f"Confirmación enviada a {username} en chat {canal_info['chat_id']} thread {canal_info['thread_id']}")
         except telegram.error.BadRequest as e:
-            bot.send_message(chat_id=canal_id, text=confirmacion_message.replace('*', ''))
-            logger.error(f"Error al enviar confirmación con Markdown al canal {canal_id}: {str(e)}")
+            bot.send_message(
+                chat_id=canal_info["chat_id"],
+                text=confirmacion_message.replace('*', ''),
+                message_thread_id=canal_info["thread_id"]
+            )
+            logger.error(f"Error al enviar confirmación con Markdown a {canal_info['chat_id']}: {str(e)}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error de Telegram al enviar a {canal_info['chat_id']} thread {canal_info['thread_id']}: {str(e)}")
 
 # Comando /on con botones
 def handle_on(update, context):
