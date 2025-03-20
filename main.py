@@ -27,14 +27,18 @@ app = Flask(__name__)
 # Configura el Dispatcher con al menos 1 worker
 dispatcher = Dispatcher(bot, None, workers=1)
 
-# Conexión a Supabase con reintentos
+# Conexión a Supabase con reintentos y forzando IPv4
 def get_db_connection():
     max_retries = 3
     retry_delay = 5  # segundos
     for attempt in range(max_retries):
         try:
             conn = psycopg2.connect(
-                os.getenv('SUPABASE_DB'),
+                dbname="postgres",
+                user="postgres",
+                password="-RAPX-U2Y.iUvLq",
+                host="34.77.162.2",  # IP fija de db.fwvhrbfoiogtkmgzddhk.supabase.co para forzar IPv4
+                port="5432",
                 connect_timeout=10  # Timeout de 10 segundos
             )
             return conn
