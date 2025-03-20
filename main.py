@@ -123,13 +123,7 @@ def handle_message(update, context):
             notificacion = (
                 f"🚫 {username_escaped}, las solicitudes están desactivadas en este grupo. Contacta a un administrador. 🌟"
             )
-            # Enviar al canal/tema específico
-            canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
-            bot.send_message(
-                chat_id=canal_info["chat_id"],
-                text=notificacion,
-                message_thread_id=canal_info["thread_id"]
-            )
+            bot.send_message(chat_id=chat_id, text=notificacion)
             logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
@@ -141,19 +135,9 @@ def handle_message(update, context):
             limite_message = (
                 f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
             )
+            bot.send_message(chat_id=chat_id, text=limite_message)
             warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
-            # Enviar al canal/tema específico
-            canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
-            bot.send_message(
-                chat_id=canal_info["chat_id"],
-                text=limite_message,
-                message_thread_id=canal_info["thread_id"]
-            )
-            bot.send_message(
-                chat_id=canal_info["chat_id"],
-                text=warn_message,
-                message_thread_id=canal_info["thread_id"]
-            )
+            bot.send_message(chat_id=chat_id, text=warn_message)
             logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
 
@@ -267,8 +251,7 @@ def handle_off(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (- polskie
-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
         return
 
     if not grupos_activos:
@@ -516,23 +499,12 @@ def button_handler(update, context):
                 ) if accion == "on" else (
                     "🚫 *Solicitudes desactivadas* 🌟\nNo se aceptan nuevas solicitudes hasta nuevo aviso.\nDisculpen las molestias. 🙏"
                 )
-                notified_groups = set()  # Evitar duplicados
-                # Enviar notificaciones solo a los grupos con solicitudes registradas entre los seleccionados
-                for ticket, info in peticiones_registradas.items():
-                    grupo_id = info["chat_id"]
-                    if grupo_id in grupos_seleccionados[chat_id]["grupos"] and grupo_id not in notified_groups:
-                        canal_info = CANALES_PETICIONES.get(grupo_id, {"chat_id": grupo_id, "thread_id": None})
-                        try:
-                            bot.send_message(
-                                chat_id=canal_info["chat_id"],
-                                text=mensaje,
-                                parse_mode='Markdown',
-                                message_thread_id=canal_info["thread_id"]
-                            )
-                            logger.info(f"Notificación /{accion} enviada a {grupo_id}, thread {canal_info['thread_id']}")
-                            notified_groups.add(grupo_id)
-                        except telegram.error.TelegramError as e:
-                            logger.error(f"Error al notificar /{accion} a {grupo_id}: {str(e)}")
+                for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
+                    try:
+                        bot.send_message(chat_id=grupo_id, text=mensaje, parse_mode='Markdown')
+                        logger.info(f"Notificación /{accion} enviada a {grupo_id}")
+                    except telegram.error.TelegramError as e:
+                        logger.error(f"Error al notificar /{accion} a {grupo_id}: {str(e)}")
                 texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} y notificadas.* 🌟"
                 query.edit_message_text(text=texto, parse_mode='Markdown')
                 del grupos_seleccionados[chat_id]
