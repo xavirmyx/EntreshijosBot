@@ -27,7 +27,7 @@ dispatcher = Dispatcher(bot, None, workers=1)
 # Diccionarios para almacenamiento en memoria
 ticket_counter = 1  # Comienza en 1 para claridad
 peticiones_por_usuario = {}  # {user_id: {"count": X, "chat_id": Y, "username": Z}}
-peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T, "chat_title": V}}
+peticiones_registradas = {}  # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "message_id": W, "timestamp": T, "chat_title": V, "thread_id": T}}
 historial_solicitudes = {}   # {ticket_number: {"chat_id": X, "username": Y, "message_text": Z, "chat_title": V, "estado": "subido/denegado/eliminado/notificado", "fecha_gestion": T, "admin_username": "@admin"}}
 procesado = {}  # Flag para evitar duplicación de mensajes (update_id: True)
 admin_ids = set([12345678])  # Lista de IDs de administradores (opcional, para excepciones en límites)
@@ -147,9 +147,7 @@ def handle_message(update, context):
             notificacion = (
                 f"🚫 {username_escaped}, las solicitudes solo son válidas en el canal de peticiones correspondiente. 🌟"
             )
-            warn_message = (
-                f"🚨 /warn {username_escaped} Petición fuera del canal correspondiente."
-            )
+            warn_message = f"/warn {username_escaped} Petición fuera del canal correspondiente."
             bot.send_message(
                 chat_id=canal_info["chat_id"],
                 text=notificacion,
@@ -159,8 +157,7 @@ def handle_message(update, context):
             bot.send_message(
                 chat_id=canal_info["chat_id"],
                 text=warn_message,
-                message_thread_id=canal_info["thread_id"],
-                parse_mode='Markdown'
+                message_thread_id=canal_info["thread_id"]
             )
             logger.info(f"Solicitud de {username} denegada: fuera del canal correcto")
             return
@@ -192,12 +189,11 @@ def handle_message(update, context):
                 message_thread_id=canal_info["thread_id"],
                 parse_mode='Markdown'
             )
-            warn_message = f"🚨 /warn {username_escaped} Límite de peticiones diarias superado"
+            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
             bot.send_message(
                 chat_id=canal_info["chat_id"],
                 text=warn_message,
-                message_thread_id=canal_info["thread_id"],
-                parse_mode='Markdown'
+                message_thread_id=canal_info["thread_id"]
             )
             logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
@@ -292,20 +288,21 @@ def handle_message(update, context):
             "Consulta /ayuda para más detalles. 🌟\n"
             "📋 *Equipo de Administración EnTresHijos*"
         )
+        warn_message = f"/warn {username_escaped} Petición no bien formulada"
 
         if len(intentos_recientes) > 2:
-            notificacion_incorrecta = (
-                f"🚨 /warn {username_escaped} Abuso de peticiones mal formuladas detectado. "
-                f"Usa solo: {', '.join(VALID_REQUEST_COMMANDS)}. "
-                "Consulta /ayuda para más información. 🌟\n"
-                "📋 *Equipo de Administración EnTresHijos*"
-            )
+            warn_message = f"/warn {username_escaped} Abuso de peticiones mal formuladas detectado"
 
         try:
             bot.send_message(
                 chat_id=canal_info["chat_id"],
                 text=notificacion_incorrecta,
                 parse_mode='Markdown',
+                message_thread_id=canal_info["thread_id"]
+            )
+            bot.send_message(
+                chat_id=canal_info["chat_id"],
+                text=warn_message,
                 message_thread_id=canal_info["thread_id"]
             )
             logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
@@ -321,11 +318,11 @@ def handle_on(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not grupos_activos:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
         return
 
     keyboard = []
@@ -351,11 +348,11 @@ def handle_off(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not grupos_activos:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
         return
 
     keyboard = []
@@ -380,11 +377,11 @@ def handle_grupos(update, context):
     chat_id = update.message.chat_id if update.message else update.callback_query.message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not grupos_estados:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
         return
 
     estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
@@ -411,11 +408,11 @@ def handle_historial(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not historial_solicitudes:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟", parse_mode='Markdown')
         return
 
     solicitudes_ordenadas = sorted(historial_solicitudes.items(), key=lambda x: x[0], reverse=True)
@@ -439,7 +436,7 @@ def handle_historial(update, context):
     historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
     bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
 
-# Comando /recuperar (nuevo)
+# Comando /recuperar
 def handle_recuperar(update, context):
     if not update.message:
         return
@@ -448,11 +445,11 @@ def handle_recuperar(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not historial_solicitudes:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes procesadas para recuperar. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes procesadas para recuperar. 🌟", parse_mode='Markdown')
         return
 
     keyboard = []
@@ -462,7 +459,7 @@ def handle_recuperar(update, context):
                                              callback_data=f"recuperar_{ticket}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     bot.send_message(chat_id=chat_id,
-                     text="🔍 *Recuperar solicitudes procesadas* 🌟\nSelecciona una solicitud para ver detalles:",
+                     text="🔍 *Recuperar solicitudes procesadas* 🌟\nSelecciona una solicitud para restaurarla:",
                      reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /pendientes con botones
@@ -474,11 +471,11 @@ def handle_pendientes(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not peticiones_registradas:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
         return
 
     keyboard = []
@@ -499,11 +496,11 @@ def handle_eliminar(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     if not peticiones_registradas:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes para eliminar. 🌟")
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes para eliminar. 🌟", parse_mode='Markdown')
         return
 
     keyboard = []
@@ -524,7 +521,7 @@ def handle_ping(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
 
     bot.send_message(chat_id=chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
@@ -538,16 +535,16 @@ def handle_subido(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
     args = context.args
     if len(args) != 1:
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /subido [ticket] 🌟")
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /subido [ticket] 🌟", parse_mode='Markdown')
         return
     try:
         ticket = int(args[0])
         if ticket not in peticiones_registradas:
-            bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
+            bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
         info = peticiones_registradas[ticket]
         keyboard = [
@@ -559,7 +556,7 @@ def handle_subido(update, context):
                          text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como subido?",
                          reply_markup=reply_markup, parse_mode='Markdown')
     except ValueError:
-        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
+        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown')
 
 # Comando /denegado con confirmación
 def handle_denegado(update, context):
@@ -570,16 +567,16 @@ def handle_denegado(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
     args = context.args
     if len(args) != 1:
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /denegado [ticket] 🌟")
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /denegado [ticket] 🌟", parse_mode='Markdown')
         return
     try:
         ticket = int(args[0])
         if ticket not in peticiones_registradas:
-            bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟")
+            bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
         info = peticiones_registradas[ticket]
         keyboard = [
@@ -591,9 +588,9 @@ def handle_denegado(update, context):
                          text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como denegado?",
                          reply_markup=reply_markup, parse_mode='Markdown')
     except ValueError:
-        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
+        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown')
 
-# Comando /alerta (reemplazo de /notificar)
+# Comando /alerta
 def handle_alerta(update, context):
     if not update.message:
         return
@@ -602,31 +599,91 @@ def handle_alerta(update, context):
     chat_id = message.chat_id
 
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
-    args = context.args
-    if len(args) < 2:
-        bot.send_message(chat_id=chat_id,
-                         text="❗ Uso: /alerta [username] [URL de la solicitud resuelta] 🌟\nEjemplo: /alerta @username https://t.me/c/123/456",
-                         parse_mode='Markdown')
+
+    if not peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes activas para alertar. 🌟", parse_mode='Markdown')
         return
-    username = args[0]
-    url = args[1]
-    if not url.startswith("https://t.me/"):
-        bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟")
-        return
-    user_info = next((info for info in historial_solicitudes.values() if info["username"] == username), None)
-    if not user_info:
-        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en el historial. 🌟")
-        return
-    keyboard = [
-        [InlineKeyboardButton("✅ Enviar", callback_data=f"confirm_alerta_{username}_{url}")],
-        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-    ]
+
+    keyboard = []
+    for ticket, info in sorted(peticiones_registradas.items(), key=lambda x: x[0]):
+        keyboard.append([InlineKeyboardButton(f"#{ticket} - {info['username']} ({info['chat_title']})",
+                                             callback_data=f"alerta_select_{ticket}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     bot.send_message(chat_id=chat_id,
-                     text=f"📢 *Confirmar alerta* 🌟\n¿Enviar notificación a {username} con el enlace {url} en su grupo?",
+                     text="📢 *Seleccionar solicitud para alerta* 🌟\nElige una solicitud activa:",
                      reply_markup=reply_markup, parse_mode='Markdown')
+
+# Comando /add+
+def handle_add_plus(update, context):
+    if not update.message:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+        return
+
+    args = context.args
+    if len(args) != 2 or not args[0].startswith('@'):
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /add+ @username [número] 🌟", parse_mode='Markdown')
+        return
+
+    username = args[0]
+    try:
+        amount = int(args[1])
+        if amount <= 0:
+            bot.send_message(chat_id=chat_id, text="❌ El número debe ser positivo. 🌟", parse_mode='Markdown')
+            return
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ El segundo argumento debe ser un número. 🌟", parse_mode='Markdown')
+        return
+
+    user_id = next((uid for uid, info in peticiones_por_usuario.items() if info["username"] == username), None)
+    if not user_id:
+        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
+        return
+
+    peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
+    bot.send_message(chat_id=chat_id, text=f"✅ Añadidas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
+
+# Comando /add-
+def handle_add_minus(update, context):
+    if not update.message:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+        return
+
+    args = context.args
+    if len(args) != 2 or not args[0].startswith('@'):
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /add- @username [número] 🌟", parse_mode='Markdown')
+        return
+
+    username = args[0]
+    try:
+        amount = int(args[1])
+        if amount <= 0:
+            bot.send_message(chat_id=chat_id, text="❌ El número debe ser positivo. 🌟", parse_mode='Markdown')
+            return
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ El segundo argumento debe ser un número. 🌟", parse_mode='Markdown')
+        return
+
+    user_id = next((uid for uid, info in peticiones_por_usuario.items() if info["username"] == username), None)
+    if not user_id:
+        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
+        return
+
+    peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
+    bot.send_message(chat_id=chat_id, text=f"✅ Quitadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
 # Manejo de botones
 def button_handler(update, context):
@@ -803,50 +860,60 @@ def button_handler(update, context):
             logger.error(f"Error al procesar acción en callback pend_: {data}")
             return
 
-        username_escaped = escape_markdown(info["username"], True)
-        message_text_escaped = escape_markdown(info["message_text"])
-        user_chat_id = info["chat_id"]
-        message_id = info["message_id"]
-        thread_id = info.get("thread_id")
+        if accion in ["subido", "denegado", "eliminar"] and len(data.split("_")) == 3:
+            keyboard = [
+                [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
+                [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            accion_str = {"subido": "subido", "denegado": "denegado", "eliminar": "eliminado"}[accion]
+            texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como {accion_str}?"
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            return
 
-        historial_solicitudes[ticket] = {
-            "chat_id": user_chat_id,
-            "username": info["username"],
-            "message_text": info["message_text"],
-            "chat_title": info["chat_title"],
-            "estado": accion,
-            "fecha_gestion": datetime.now(SPAIN_TZ),
-            "admin_username": admin_username
-        }
+        if len(data.split("_")) == 4 and data.endswith("confirm"):
+            accion = data.split("_")[2]
+            username_escaped = escape_markdown(info["username"], True)
+            message_text_escaped = escape_markdown(info["message_text"])
+            user_chat_id = info["chat_id"]
+            message_id = info["message_id"]
+            thread_id = info.get("thread_id")
 
-        if accion == "subido":
-            notificacion = f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉"
-            bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
-            texto = f"✅ *Ticket #{ticket} procesado como subido.* 🌟"
-            if texto != current_text:
+            historial_solicitudes[ticket] = {
+                "chat_id": user_chat_id,
+                "username": info["username"],
+                "message_text": info["message_text"],
+                "chat_title": info["chat_title"],
+                "estado": accion,
+                "fecha_gestion": datetime.now(SPAIN_TZ),
+                "admin_username": admin_username
+            }
+
+            if accion == "subido":
+                notificacion = f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉"
+                bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
+                texto = f"✅ *Ticket #{ticket} procesado como subido.* 🌟"
                 query.edit_message_text(text=texto, parse_mode='Markdown')
-            del peticiones_registradas[ticket]
+                del peticiones_registradas[ticket]
 
-        elif accion == "denegado":
-            notificacion = f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟"
-            bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
-            texto = f"✅ *Ticket #{ticket} procesado como denegado.* 🌟"
-            if texto != current_text:
+            elif accion == "denegado":
+                notificacion = f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟"
+                bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
+                texto = f"✅ *Ticket #{ticket} procesado como denegado.* 🌟"
                 query.edit_message_text(text=texto, parse_mode='Markdown')
-            del peticiones_registradas[ticket]
+                del peticiones_registradas[ticket]
 
-        elif accion == "eliminar":
-            try:
-                bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
-                bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} de {username_escaped} eliminado. 🌟")
-            except telegram.error.TelegramError as e:
-                bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {str(e)}. Notificando de todos modos. 🌟")
-            notificacion = f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟"
-            bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
-            texto = f"✅ *Ticket #{ticket} procesado como eliminado.* 🌟"
-            if texto != current_text:
+            elif accion == "eliminar":
+                try:
+                    bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
+                    bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} de {username_escaped} eliminado. 🌟", parse_mode='Markdown')
+                except telegram.error.TelegramError as e:
+                    bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {str(e)}. Notificando de todos modos. 🌟", parse_mode='Markdown')
+                notificacion = f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟"
+                bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
+                texto = f"✅ *Ticket #{ticket} procesado como eliminado.* 🌟"
                 query.edit_message_text(text=texto, parse_mode='Markdown')
-            del peticiones_registradas[ticket]
+                del peticiones_registradas[ticket]
 
     # Manejo de /eliminar
     if data.startswith("eliminar_"):
@@ -897,9 +964,9 @@ def button_handler(update, context):
 
         try:
             bot.delete_message(chat_id=GROUP_DESTINO, message_id=message_id)
-            bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} de {escape_markdown(username, True)} eliminado ({estado}). 🌟")
+            bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} de {escape_markdown(username, True)} eliminado ({estado}). 🌟", parse_mode='Markdown')
         except telegram.error.TelegramError as e:
-            bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {str(e)}. Notificando de todos modos. 🌟")
+            bot.send_message(chat_id=chat_id, text=f"⚠️ No se pudo eliminar el mensaje: {str(e)}. Notificando de todos modos. 🌟", parse_mode='Markdown')
 
         username_escaped = escape_markdown(username, True)
         message_text_escaped = escape_markdown(message_text)
@@ -915,8 +982,7 @@ def button_handler(update, context):
 
         bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
         texto = f"✅ *Ticket #{ticket} procesado como {estado}.* 🌟"
-        if texto != current_text:
-            query.edit_message_text(text=texto, parse_mode='Markdown')
+        query.edit_message_text(text=texto, parse_mode='Markdown')
         del peticiones_registradas[ticket]
 
     # Manejo de confirmaciones /subido y /denegado
@@ -938,7 +1004,7 @@ def button_handler(update, context):
         bot.send_message(chat_id=info["chat_id"],
                          text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) ha sido subida. 🎉",
                          parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-        bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como subido. 🌟")
+        bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como subido. 🌟", parse_mode='Markdown')
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como subido.* 🌟", parse_mode='Markdown')
         del peticiones_registradas[ticket]
 
@@ -960,7 +1026,7 @@ def button_handler(update, context):
         bot.send_message(chat_id=info["chat_id"],
                          text=f"❌ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) ha sido denegada. 🌟",
                          parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-        bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como denegado. 🌟")
+        bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como denegado. 🌟", parse_mode='Markdown')
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como denegado.* 🌟", parse_mode='Markdown')
         del peticiones_registradas[ticket]
 
@@ -971,39 +1037,118 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado en el historial. 🌟", parse_mode='Markdown')
             return
         info = historial_solicitudes[ticket]
-        estado_str = {
-            "subido": "✅ Aceptada",
-            "denegado": "❌ Denegada",
-            "eliminado": "🗑️ Eliminada",
-            "notificado": "📢 Respondida"
-        }.get(info["estado"], "🔄 Desconocido")
+        keyboard = [
+            [InlineKeyboardButton("✅ Confirmar", callback_data=f"recuperar_confirm_{ticket}")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         texto = (
-            f"🔍 *Solicitud Recuperada #{ticket}* 🌟\n"
+            f"🔍 *Recuperar Ticket #{ticket}* 🌟\n"
             f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
             f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
             f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-            f"📅 *Gestionada:* {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-            f"👥 *Admin:* {info['admin_username']}\n"
-            f"📌 *Estado:* {estado_str}"
+            f"¿Restaurar esta solicitud para procesarla nuevamente?"
         )
-        query.edit_message_text(text=texto, parse_mode='Markdown')
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+
+    if data.startswith("recuperar_confirm_"):
+        ticket = int(data.split("_")[2])
+        if ticket not in historial_solicitudes:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado en el historial. 🌟", parse_mode='Markdown')
+            return
+        info = historial_solicitudes[ticket]
+        destino_message = (
+            "📬 *Solicitud recuperada* 🌟\n"
+            f"👤 *Usuario:* {escape_markdown(info['username'], True)} (ID: {info.get('user_id', 'N/A')})\n"
+            f"🎫 *Ticket:* #{ticket}\n"
+            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+            f"🕒 *Fecha original:* {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S') if 'timestamp' in info else 'N/A'}\n"
+            "🌟 *Bot de Entreshijos*"
+        )
+        sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
+        peticiones_registradas[ticket] = {
+            "chat_id": info["chat_id"],
+            "username": info["username"],
+            "message_text": info["message_text"],
+            "message_id": sent_message.message_id,
+            "timestamp": info.get("timestamp", datetime.now(SPAIN_TZ)),
+            "chat_title": info["chat_title"],
+            "thread_id": info.get("thread_id")
+        }
+        del historial_solicitudes[ticket]
+        query.edit_message_text(text=f"✅ *Ticket #{ticket} restaurado para procesamiento.* 🌟", parse_mode='Markdown')
 
     # Manejo de /alerta
-    if data.startswith("confirm_alerta_"):
-        parts = data.split("_", 3)
-        username = parts[2]
-        url = parts[3]
-        user_info = next((info for info in historial_solicitudes.values() if info["username"] == username), None)
-        if not user_info:
-            query.edit_message_text(text=f"❌ {username} no encontrado en el historial. 🌟", parse_mode='Markdown')
+    if data.startswith("alerta_select_"):
+        ticket = int(data.split("_")[2])
+        if ticket not in peticiones_registradas:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
+        info = peticiones_registradas[ticket]
+        keyboard = [
+            [InlineKeyboardButton("✅ Confirmar", callback_data=f"alerta_confirm_{ticket}")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        texto = (
+            f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
+            f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+            "Responde con la URL de la solicitud resuelta:"
+        )
+        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        context.user_data["alerta_ticket"] = ticket
+
+    if data.startswith("alerta_confirm_"):
+        ticket = int(data.split("_")[2])
+        if ticket not in peticiones_registradas or "alerta_url" not in context.user_data:
+            query.edit_message_text(text="❌ Error: Ticket no encontrado o URL no proporcionada. 🌟", parse_mode='Markdown')
+            return
+        info = peticiones_registradas[ticket]
+        url = context.user_data["alerta_url"]
         notificacion = (
             f"📢 *Alerta* 🌟\n"
-            f"Hola {escape_markdown(username, True)}, aquí tienes el enlace a tu solicitud resuelta:\n"
-            f"[Solicitud]({url})"
+            f"Hola {escape_markdown(info['username'], True)}, aquí tienes el enlace a tu solicitud:\n"
+            f"[Solicitud #{ticket}]({url})"
         )
-        bot.send_message(chat_id=user_info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=user_info.get("thread_id"))
-        query.edit_message_text(text=f"✅ Alerta enviada a {username} con el enlace {url}. 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+        query.edit_message_text(text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟", parse_mode='Markdown')
+        del context.user_data["alerta_ticket"]
+        del context.user_data["alerta_url"]
+
+# Manejo de respuestas para /alerta
+def handle_alerta_respuesta(update, context):
+    if not update.message or "alerta_ticket" not in context.user_data:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        return
+
+    ticket = context.user_data["alerta_ticket"]
+    if ticket not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+        del context.user_data["alerta_ticket"]
+        return
+
+    url = message.text.strip()
+    if not url.startswith("https://t.me/"):
+        bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟", parse_mode='Markdown')
+        return
+
+    context.user_data["alerta_url"] = url
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirmar", callback_data=f"alerta_confirm_{ticket}")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    bot.send_message(chat_id=chat_id,
+                     text=f"📢 *Confirmar alerta* 🌟\n¿Enviar esta URL a {peticiones_registradas[ticket]['username']}?\n{url}",
+                     reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /menu
 def handle_menu(update, context):
@@ -1013,7 +1158,7 @@ def handle_menu(update, context):
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟")
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
     menu_message = (
         "📋 *Menú de comandos* 🌟\n"
@@ -1026,8 +1171,10 @@ def handle_menu(update, context):
         "🗑️ */eliminar [ticket]* - Eliminar solicitud.\n"
         "✅ */subido [ticket]* - Marcar como subida.\n"
         "❌ */denegado [ticket]* - Marcar como denegada.\n"
-        "📢 */alerta [username] [URL]* - Enviar alerta con enlace.\n"
-        "🔍 */recuperar* - Ver solicitudes procesadas.\n"
+        "📢 */alerta* - Enviar alerta con enlace.\n"
+        "🔍 */recuperar* - Restaurar solicitudes procesadas.\n"
+        "➕ */add+ @username [número]* - Añadir peticiones.\n"
+        "➖ */add- @username [número]* - Quitar peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
@@ -1044,7 +1191,9 @@ def handle_ayuda(update, context):
 
     message = update.message
     chat_id = message.chat_id
+    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
     username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
+    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
     ayuda_message = (
         "📖 *Guía rápida* 🌟\n"
         f"Hola {username}, usa comandos como */solicito*, *#peticion*, etc., para enviar una solicitud (máx. 2/día).\n"
@@ -1052,7 +1201,7 @@ def handle_ayuda(update, context):
         "🔍 */estado [ticket]* - Consulta el estado.\n"
         "🌟 *¡Gracias por usar el bot!* 🙌"
     )
-    bot.send_message(chat_id=chat_id, text=ayuda_message, parse_mode='Markdown')
+    bot.send_message(chat_id=canal_info["chat_id"], text=ayuda_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
 # Comando /estado
 def handle_estado(update, context):
@@ -1061,10 +1210,12 @@ def handle_estado(update, context):
 
     message = update.message
     chat_id = message.chat_id
+    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
+    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
     username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
     args = context.args
     if not args:
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /estado [ticket] 🌟")
+        bot.send_message(chat_id=canal_info["chat_id"], text="❗ Uso: /estado [ticket] 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
         return
     try:
         ticket = int(args[0])
@@ -1093,9 +1244,9 @@ def handle_estado(update, context):
             )
         else:
             estado_message = f"📋 *Estado* 🌟\nTicket #{ticket}: No encontrado. 🔍"
-        bot.send_message(chat_id=chat_id, text=estado_message, parse_mode='Markdown')
+        bot.send_message(chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
     except ValueError:
-        bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟")
+        bot.send_message(chat_id=canal_info["chat_id"], text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
 # Añadir handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
@@ -1110,10 +1261,13 @@ dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('subido', handle_subido))
 dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
 dispatcher.add_handler(CommandHandler('alerta', handle_alerta))
+dispatcher.add_handler(CommandHandler('add+', handle_add_plus))
+dispatcher.add_handler(CommandHandler('add-', handle_add_minus))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
+dispatcher.add_handler(MessageHandler(Filters.reply & Filters.text & ~Filters.command, handle_alerta_respuesta))
 
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
