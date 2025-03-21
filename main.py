@@ -615,8 +615,8 @@ def handle_alerta(update, context):
                      text="📢 *Seleccionar solicitud para alerta* 🌟\nElige una solicitud activa:",
                      reply_markup=reply_markup, parse_mode='Markdown')
 
-# Comando /add+
-def handle_add_plus(update, context):
+# Comando /addplus
+def handle_addplus(update, context):
     if not update.message:
         return
 
@@ -629,7 +629,7 @@ def handle_add_plus(update, context):
 
     args = context.args
     if len(args) != 2 or not args[0].startswith('@'):
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /add+ @username [número] 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /addplus @username [número] 🌟", parse_mode='Markdown')
         return
 
     username = args[0]
@@ -650,8 +650,8 @@ def handle_add_plus(update, context):
     peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
     bot.send_message(chat_id=chat_id, text=f"✅ Añadidas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
-# Comando /add-
-def handle_add_minus(update, context):
+# Comando /addminus
+def handle_addminus(update, context):
     if not update.message:
         return
 
@@ -664,7 +664,7 @@ def handle_add_minus(update, context):
 
     args = context.args
     if len(args) != 2 or not args[0].startswith('@'):
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /add- @username [número] 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /addminus @username [número] 🌟", parse_mode='Markdown')
         return
 
     username = args[0]
@@ -1173,8 +1173,8 @@ def handle_menu(update, context):
         "❌ */denegado [ticket]* - Marcar como denegada.\n"
         "📢 */alerta* - Enviar alerta con enlace.\n"
         "🔍 */recuperar* - Restaurar solicitudes procesadas.\n"
-        "➕ */add+ @username [número]* - Añadir peticiones.\n"
-        "➖ */add- @username [número]* - Quitar peticiones.\n"
+        "➕ */addplus @username [número]* - Añadir peticiones.\n"
+        "➖ */addminus @username [número]* - Quitar peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
@@ -1261,8 +1261,8 @@ dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('subido', handle_subido))
 dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
 dispatcher.add_handler(CommandHandler('alerta', handle_alerta))
-dispatcher.add_handler(CommandHandler('add+', handle_add_plus))
-dispatcher.add_handler(CommandHandler('add-', handle_add_minus))
+dispatcher.add_handler(CommandHandler('addplus', handle_addplus))
+dispatcher.add_handler(CommandHandler('addminus', handle_addminus))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
