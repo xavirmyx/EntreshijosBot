@@ -42,8 +42,9 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
                       chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
+        # Ajustamos la creación de la tabla procesado para usar "id" y agregar "created_at"
         c.execute('''CREATE TABLE IF NOT EXISTS procesado 
-                     (update_id BIGINT PRIMARY KEY)''')
+                     (id BIGINT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
                      (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP, chat_id BIGINT)''')
         conn.commit()
@@ -141,16 +142,27 @@ def set_historial_solicitud(ticket_number, data):
         conn.commit()
 
 def is_procesado(update_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT update_id FROM procesado WHERE update_id = %s", (update_id,))
-        return c.fetchone() is not None
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as c:
+                # Ajustamos para usar la columna "id" en lugar de "update_id"
+                c.execute("SELECT id FROM procesado WHERE id = %s", (update_id,))
+                result = c.fetchone()
+                return result is not None
+    except Exception as e:
+        logger.error(f"Error al verificar si el update_id está procesado: {str(e)}")
+        return False  # En caso de error, asumimos que no está procesado para evitar bloquear el bot
 
 def set_procesado(update_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO procesado (update_id) VALUES (%s) ON CONFLICT DO NOTHING", (update_id,))
-        conn.commit()
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as c:
+                # Ajustamos para usar la columna "id" y dejamos que "created_at" se llene automáticamente
+                c.execute("INSERT INTO procesado (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (update_id,))
+                conn.commit()
+    except Exception as e:
+        logger.error(f"Error al registrar el update_id como procesado: {str(e)}")
+        # No lanzamos una excepción para evitar que el bot se detenga
 
 def get_peticiones_incorrectas(user_id):
     with get_db_connection() as conn:
