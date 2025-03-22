@@ -615,8 +615,8 @@ def handle_alerta(update, context):
                      text="📢 *Seleccionar solicitud para alerta* 🌟\nElige una solicitud activa:",
                      reply_markup=reply_markup, parse_mode='Markdown')
 
-# Comando /addplus
-def handle_addplus(update, context):
+# Comando /restar (reemplaza a /addplus)
+def handle_restar(update, context):
     if not update.message:
         return
 
@@ -629,7 +629,7 @@ def handle_addplus(update, context):
 
     args = context.args
     if len(args) != 2 or not args[0].startswith('@'):
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /addplus @username [número] 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /restar @username [número] 🌟", parse_mode='Markdown')
         return
 
     username = args[0]
@@ -648,10 +648,10 @@ def handle_addplus(update, context):
         return
 
     peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
-    bot.send_message(chat_id=chat_id, text=f"✅ Añadidas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
+    bot.send_message(chat_id=chat_id, text=f"✅ Restadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
-# Comando /addminus
-def handle_addminus(update, context):
+# Comando /sumar (reemplaza a /addminus)
+def handle_sumar(update, context):
     if not update.message:
         return
 
@@ -664,7 +664,7 @@ def handle_addminus(update, context):
 
     args = context.args
     if len(args) != 2 or not args[0].startswith('@'):
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /addminus @username [número] 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /sumar @username [número] 🌟", parse_mode='Markdown')
         return
 
     username = args[0]
@@ -683,7 +683,7 @@ def handle_addminus(update, context):
         return
 
     peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
-    bot.send_message(chat_id=chat_id, text=f"✅ Quitadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
+    bot.send_message(chat_id=chat_id, text=f"✅ Sumadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
 # Manejo de botones
 def button_handler(update, context):
@@ -1063,7 +1063,7 @@ def button_handler(update, context):
             f"🎫 *Ticket:* #{ticket}\n"
             f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
             f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-            f"🕒 *Fecha original:* {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S') if 'timestamp' in info else 'N/A'}\n"
+            f"🕒 *Fecha original:* {info.get('timestamp', datetime.now(SPAIN_TZ)).strftime('%d/%m/%Y %H:%M:%S')}\n"
             "🌟 *Bot de Entreshijos*"
         )
         sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
@@ -1086,37 +1086,15 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
         info = peticiones_registradas[ticket]
-        keyboard = [
-            [InlineKeyboardButton("✅ Confirmar", callback_data=f"alerta_confirm_{ticket}")],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         texto = (
             f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
             f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
             f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
             f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-            "Responde con la URL de la solicitud resuelta:"
+            "Por favor, responde con la URL de la solicitud resuelta (https://t.me/...):"
         )
-        query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+        query.edit_message_text(text=texto, parse_mode='Markdown')
         context.user_data["alerta_ticket"] = ticket
-
-    if data.startswith("alerta_confirm_"):
-        ticket = int(data.split("_")[2])
-        if ticket not in peticiones_registradas or "alerta_url" not in context.user_data:
-            query.edit_message_text(text="❌ Error: Ticket no encontrado o URL no proporcionada. 🌟", parse_mode='Markdown')
-            return
-        info = peticiones_registradas[ticket]
-        url = context.user_data["alerta_url"]
-        notificacion = (
-            f"📢 *Alerta* 🌟\n"
-            f"Hola {escape_markdown(info['username'], True)}, aquí tienes el enlace a tu solicitud:\n"
-            f"[Solicitud #{ticket}]({url})"
-        )
-        bot.send_message(chat_id=info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-        query.edit_message_text(text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟", parse_mode='Markdown')
-        del context.user_data["alerta_ticket"]
-        del context.user_data["alerta_url"]
 
 # Manejo de respuestas para /alerta
 def handle_alerta_respuesta(update, context):
@@ -1140,15 +1118,15 @@ def handle_alerta_respuesta(update, context):
         bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟", parse_mode='Markdown')
         return
 
-    context.user_data["alerta_url"] = url
-    keyboard = [
-        [InlineKeyboardButton("✅ Confirmar", callback_data=f"alerta_confirm_{ticket}")],
-        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id,
-                     text=f"📢 *Confirmar alerta* 🌟\n¿Enviar esta URL a {peticiones_registradas[ticket]['username']}?\n{url}",
-                     reply_markup=reply_markup, parse_mode='Markdown')
+    info = peticiones_registradas[ticket]
+    notificacion = (
+        f"📢 *Alerta* 🌟\n"
+        f"Hola {escape_markdown(info['username'], True)}, aquí tienes el enlace a tu solicitud:\n"
+        f"[Solicitud #{ticket}]({url})"
+    )
+    bot.send_message(chat_id=info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+    bot.send_message(chat_id=chat_id, text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟", parse_mode='Markdown')
+    del context.user_data["alerta_ticket"]
 
 # Comando /menu
 def handle_menu(update, context):
@@ -1164,17 +1142,12 @@ def handle_menu(update, context):
         "📋 *Menú de comandos* 🌟\n"
         "🔧 *Usuarios:*\n"
         "✅ */solicito*, */solícito*, *#solicito*, etc. - Enviar solicitud (máx. 2/día).\n"
-        "🔍 */estado [ticket]* - Consultar estado.\n"
-        "📖 */ayuda* - Guía rápida.\n"
         "🔧 *Comandos en grupo destino:*\n"
         "📋 */pendientes* - Gestionar solicitudes.\n"
-        "🗑️ */eliminar [ticket]* - Eliminar solicitud.\n"
-        "✅ */subido [ticket]* - Marcar como subida.\n"
-        "❌ */denegado [ticket]* - Marcar como denegada.\n"
         "📢 */alerta* - Enviar alerta con enlace.\n"
         "🔍 */recuperar* - Restaurar solicitudes procesadas.\n"
-        "➕ */addplus @username [número]* - Añadir peticiones.\n"
-        "➖ */addminus @username [número]* - Quitar peticiones.\n"
+        "➖ */restar @username [número]* - Restar peticiones.\n"
+        "➕ */sumar @username [número]* - Sumar peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
@@ -1261,8 +1234,8 @@ dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('subido', handle_subido))
 dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
 dispatcher.add_handler(CommandHandler('alerta', handle_alerta))
-dispatcher.add_handler(CommandHandler('addplus', handle_addplus))
-dispatcher.add_handler(CommandHandler('addminus', handle_addminus))
+dispatcher.add_handler(CommandHandler('restar', handle_restar))
+dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
