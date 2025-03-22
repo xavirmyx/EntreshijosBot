@@ -1095,27 +1095,22 @@ def button_handler(update, context):
         )
         query.edit_message_text(text=texto, parse_mode='Markdown')
         context.user_data["alerta_ticket"] = ticket
-        context.user_data["alerta_chat_id"] = chat_id  # Guardar el chat_id para validar
 
 # Manejo de respuestas para /alerta
 def handle_alerta_respuesta(update, context):
-    if not update.message:
+    if not update.message or "alerta_ticket" not in context.user_data:
         return
 
     message = update.message
     chat_id = message.chat_id
 
-    # Verificar si estamos esperando una respuesta para /alerta
-    if "alerta_ticket" not in context.user_data or "alerta_chat_id" not in context.user_data:
-        return
-
-    # Validar que el mensaje proviene del chat correcto
-    if str(chat_id) != str(context.user_data["alerta_chat_id"]):
+    if str(chat_id) != GROUP_DESTINO:
         return
 
     ticket = context.user_data["alerta_ticket"]
     if ticket not in peticiones_registradas:
-        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. Usa /alerta nuevamente. 🌟", parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+        del context.user_data["alerta_ticket"]
         return
 
     url = message.text.strip()
@@ -1127,20 +1122,11 @@ def handle_alerta_respuesta(update, context):
     notificacion = (
         f"📢 *Alerta* 🌟\n"
         f"Hola {escape_markdown(info['username'], True)}, aquí tienes el enlace a tu solicitud:\n"
-        f"[Solicitud #{ticket}]({url})\n"
-        f"{random.choice(frases_agradecimiento)}"
+        f"[Solicitud #{ticket}]({url})"
     )
-    bot.send_message(
-        chat_id=info["chat_id"],
-        text=notificacion,
-        parse_mode='Markdown',
-        message_thread_id=info.get("thread_id")
-    )
-    bot.send_message(
-        chat_id=chat_id,
-        text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟",
-        parse_mode='Markdown'
-    )
+    bot.send_message(chat_id=info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+    bot.send_message(chat_id=chat_id, text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟", parse_mode='Markdown')
+    del context.user_data["alerta_ticket"]
 
 # Comando /menu
 def handle_menu(update, context):
@@ -1230,65 +1216,54 @@ def handle_estado(update, context):
                 f"👥 Admin: {info['admin_username']}"
             )
         else:
-            estado_message = f"❌ Ticket #{ticket} no encontrado. 🌟"
-        bot.send_message(
-            chat_id=canal_info["chat_id"],
-            text=estado_message,
-            parse_mode='Markdown',
-            message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None
-        )
+            estado_message = f"📋 *Estado* 🌟\nTicket #{ticket}: No encontrado. 🔍"
+        bot.send_message(chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
     except ValueError:
-        bot.send_message(
-            chat_id=canal_info["chat_id"],
-            text="❗ Ticket debe ser un número. 🌟",
-            parse_mode='Markdown',
-            message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None
-        )
+        bot.send_message(chat_id=canal_info["chat_id"], text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
-# Configurar handlers
-dispatcher.add_handler(CommandHandler("on", handle_on))
-dispatcher.add_handler(CommandHandler("off", handle_off))
-dispatcher.add_handler(CommandHandler("grupos", handle_grupos))
-dispatcher.add_handler(CommandHandler("historial", handle_historial))
-dispatcher.add_handler(CommandHandler("recuperar", handle_recuperar))
-dispatcher.add_handler(CommandHandler("pendientes", handle_pendientes))
-dispatcher.add_handler(CommandHandler("eliminar", handle_eliminar))
-dispatcher.add_handler(CommandHandler("ping", handle_ping))
-dispatcher.add_handler(CommandHandler("subido", handle_subido))
-dispatcher.add_handler(CommandHandler("denegado", handle_denegado))
-dispatcher.add_handler(CommandHandler("alerta", handle_alerta))
-dispatcher.add_handler(CommandHandler("restar", handle_restar))
-dispatcher.add_handler(CommandHandler("sumar", handle_sumar))
-dispatcher.add_handler(CommandHandler("menu", handle_menu))
-dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-dispatcher.add_handler(CommandHandler("estado", handle_estado))
+# Añadir handlers
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+dispatcher.add_handler(CommandHandler('on', handle_on))
+dispatcher.add_handler(CommandHandler('off', handle_off))
+dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
+dispatcher.add_handler(CommandHandler('historial', handle_historial))
+dispatcher.add_handler(CommandHandler('recuperar', handle_recuperar))
+dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
+dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
+dispatcher.add_handler(CommandHandler('ping', handle_ping))
+dispatcher.add_handler(CommandHandler('subido', handle_subido))
+dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
+dispatcher.add_handler(CommandHandler('alerta', handle_alerta))
+dispatcher.add_handler(CommandHandler('restar', handle_restar))
+dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
+dispatcher.add_handler(CommandHandler('menu', handle_menu))
+dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
+dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_alerta_respuesta))
-dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
+dispatcher.add_handler(MessageHandler(Filters.reply & Filters.text & ~Filters.command, handle_alerta_respuesta))
 
-# Ruta para el webhook
+# Rutas Flask
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = telegram.Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'ok'
+    try:
+        update_json = request.get_json(force=True)
+        if not update_json:
+            logger.error("No se recibió JSON válido")
+            return 'No JSON', 400
+        update = telegram.Update.de_json(update_json, bot)
+        if not update:
+            logger.error("No se pudo deserializar la actualización")
+            return 'Invalid update', 400
+        dispatcher.process_update(update)
+        return 'ok', 200
+    except Exception as e:
+        logger.error(f"Error en webhook: {str(e)}")
+        return f'Error: {str(e)}', 500
 
-# Configurar el webhook
-def set_webhook():
-    webhook_info = bot.get_webhook_info()
-    if webhook_info.url != WEBHOOK_URL:
-        bot.delete_webhook()
-        bot.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook configurado en {WEBHOOK_URL}")
-    else:
-        logger.info("Webhook ya configurado correctamente")
-
-# Ruta raíz para verificar que el servidor está activo
 @app.route('/')
-def home():
-    return "Bot de EnTresHijos activo!"
+def health_check():
+    return "Bot de Entreshijos está activo! 🌟", 200
 
 if __name__ == '__main__':
-    set_webhook()
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    logger.info("Iniciando bot en modo local")
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
