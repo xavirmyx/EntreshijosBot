@@ -1340,6 +1340,7 @@ dispatcher.add_handler(CommandHandler("menu", handle_menu))
 dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
 dispatcher.add_handler(CommandHandler("estado", handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
+
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
 def webhook():
