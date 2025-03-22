@@ -1079,22 +1079,22 @@ def button_handler(update, context):
         del historial_solicitudes[ticket]
         query.edit_message_text(text=f"✅ *Ticket #{ticket} restaurado para procesamiento.* 🌟", parse_mode='Markdown')
 
-    # Manejo de /alerta
-    if data.startswith("alerta_select_"):
-        ticket = int(data.split("_")[2])
-        if ticket not in peticiones_registradas:
-            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
-            return
-        info = peticiones_registradas[ticket]
-        texto = (
-            f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
-            f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
-            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
-            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-            "Por favor, responde con la URL de la solicitud resuelta (https://t.me/...):"
-        )
-        query.edit_message_text(text=texto, parse_mode='Markdown')
-        context.user_data["alerta_ticket"] = ticket
+        # Manejo de /alerta
+        if data.startswith("alerta_select_"):
+            ticket = int(data.split("_")[2])
+            if ticket not in peticiones_registradas:
+                query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+                return
+            info = peticiones_registradas[ticket]
+            texto = (
+                f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
+                f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+                f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+                f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+                "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+            )
+            query.edit_message_text(text=texto, parse_mode='Markdown')
+            context.user_data["alerta_ticket"] = ticket
 
 # Manejo de respuestas para /alerta
 def handle_alerta_respuesta(update, context):
