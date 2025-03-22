@@ -247,9 +247,9 @@ def handle_message(update, context):
             f"📝 *Mensaje:* {message_text_escaped}  \n"
             f"🎫 *Ticket:* #{ticket_number} se te ha asignado  \n"
             "🔹 *Consulta tu solicitud:*  \n"
-            "🔍 /estado {ticket_number} – Ver estado 📌  \n"
+            "🔍 /estado {Num de ticket asignado} – Ver estado 📌  \n"
             "📖 /ayuda – Más información ℹ️  \n\n"
-            "⏳ *Tu solicitud será atendida pronto. ¡Gracias por tu paciencia!* 🙌"
+            "⏳ *Tu solicitud será atendida pronto. Equipo de EntresHijos ¡Gracias por tu paciencia!* 🙌"
         )
         try:
             bot.send_message(
