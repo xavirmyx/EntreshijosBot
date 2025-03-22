@@ -14,7 +14,9 @@ from psycopg2.extras import DictCursor
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
-DATABASE_URL = os.getenv('DATABASE_URL')  # URL de la base de datos desde Supabase
+DATABASE_URL = os.getenv('DATABASE_URL')
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL no está configurada en las variables de entorno. Por favor, configúrala en Render.")
 
 # Configura el logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -29,26 +31,35 @@ dispatcher = Dispatcher(bot, None, workers=1)
 
 # Inicialización de la base de datos PostgreSQL
 def init_db():
-    conn = psycopg2.connect(DATABASE_URL)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
-                 (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
-                 (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                  message_id BIGINT, timestamp TIMESTAMP, chat_title TEXT, thread_id BIGINT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
-                 (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                  chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS procesado 
-                 (update_id BIGINT PRIMARY KEY)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
-                 (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP, chat_id BIGINT)''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
+                     (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
+                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+                      message_id BIGINT, timestamp TIMESTAMP, chat_title TEXT, thread_id BIGINT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
+                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+                      chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS procesado 
+                     (update_id BIGINT PRIMARY KEY)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
+                     (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP, chat_id BIGINT)''')
+        conn.commit()
+        conn.close()
+        logger.info("Base de datos inicializada correctamente.")
+    except Exception as e:
+        logger.error(f"Error al inicializar la base de datos: {str(e)}")
+        raise
 
 # Funciones de utilidad para la base de datos
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor)
+    try:
+        return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor)
+    except psycopg2.OperationalError as e:
+        logger.error(f"Error al conectar a la base de datos: {str(e)}")
+        raise
 
 def get_ticket_counter():
     with get_db_connection() as conn:
