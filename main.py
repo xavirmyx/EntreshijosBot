@@ -231,11 +231,23 @@ def remove_emojis(text):
 
 def update_grupos_estados(chat_id, title=None):
     grupos = get_grupos_estados()
+    if not title:
+        title = f"Grupo {chat_id}"
+    # Clean the title before storing
+    clean_title = remove_emojis(title)
+    clean_title = escape_markdown(clean_title)
+
     if chat_id not in grupos:
-        set_grupo_estado(chat_id, title if title else f"Grupo {chat_id}")
-    elif title and grupos[chat_id]["title"] == f"Grupo {chat_id}":
-        set_grupo_estado(chat_id, title)
-    logger.info(f"✅ Grupo registrado/actualizado: {chat_id} - {title or grupos.get(chat_id, {}).get('title')}")
+        set_grupo_estado(chat_id, clean_title)
+        logger.info(f"✅ Nuevo grupo registrado: {chat_id} - {clean_title}")
+    else:
+        # Always update the title if a new one is provided
+        current_title = grupos[chat_id]["title"]
+        if current_title != clean_title:
+            set_grupo_estado(chat_id, clean_title, grupos[chat_id]["activo"])
+            logger.info(f"✅ Título del grupo actualizado: {chat_id} - {current_title} -> {clean_title}")
+        else:
+            logger.info(f"✅ Grupo ya registrado, sin cambios: {chat_id} - {clean_title}")
 
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
@@ -715,35 +727,50 @@ def handle_graficas(update, context):
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
         return
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM peticiones_registradas")
-        total_recibidas = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'subido'")
-        total_aceptadas = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'denegado'")
-        total_denegadas = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'eliminado'")
-        total_eliminadas = c.fetchone()[0]
-        c.execute("SELECT admin_username, COUNT(*) as count FROM historial_solicitudes GROUP BY admin_username ORDER BY count DESC LIMIT 1")
-        admin_max = c.fetchone()
-        admin_max_name = admin_max['admin_username'] if admin_max else "N/A"
-        admin_max_count = admin_max['count'] if admin_max else 0
-        c.execute("SELECT username, COUNT(*) as count FROM peticiones_registradas GROUP BY username ORDER BY count DESC LIMIT 1")
-        user_max = c.fetchone()
-        user_max_name = user_max['username'] if user_max else "N/A"
-        user_max_count = user_max['count'] if user_max else 0
-    graficas_message = (
-        f"📊 *Estadísticas del Bot* 🌟\n"
-        f"📥 Total de solicitudes recibidas: {total_recibidas}\n"
-        f"✅ Solicitudes aceptadas: {total_aceptadas}\n"
-        f"❌ Solicitudes denegadas: {total_denegadas}\n"
-        f"🗑️ Solicitudes eliminadas: {total_eliminadas}\n"
-        f"👑 Admin más activo: {escape_markdown(admin_max_name, True)} ({admin_max_count} solicitudes)\n"
-        f"👤 Usuario con más peticiones: {escape_markdown(user_max_name, True)} ({user_max_count} peticiones)\n"
-        "🌟 *Bot de Entreshijos*"
-    )
-    bot.send_message(chat_id=chat_id, text=graficas_message, parse_mode='Markdown')
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM peticiones_registradas")
+            total_recibidas = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'subido'")
+            total_aceptadas = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'denegado'")
+            total_denegadas = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'eliminado'")
+            total_eliminadas = c.fetchone()[0]
+            c.execute("SELECT admin_username, COUNT(*) as count FROM historial_solicitudes GROUP BY admin_username ORDER BY count DESC LIMIT 1")
+            admin_max = c.fetchone()
+            admin_max_name = admin_max['admin_username'] if admin_max else "N/A"
+            admin_max_count = admin_max['count'] if admin_max else 0
+            c.execute("SELECT username, COUNT(*) as count FROM peticiones_registradas GROUP BY username ORDER BY count DESC LIMIT 1")
+            user_max = c.fetchone()
+            user_max_name = user_max['username'] if user_max else "N/A"
+            user_max_count = user_max['count'] if user_max else 0
+
+        # Properly escape usernames to avoid Markdown parsing issues
+        escaped_admin_max_name = escape_markdown(admin_max_name, preserve_username=True)
+        escaped_user_max_name = escape_markdown(user_max_name, preserve_username=True)
+
+        graficas_message = (
+            f"📊 *Estadísticas del Bot* 🌟\n"
+            f"📥 Total de solicitudes recibidas: {total_recibidas}\n"
+            f"✅ Solicitudes aceptadas: {total_aceptadas}\n"
+            f"❌ Solicitudes denegadas: {total_denegadas}\n"
+            f"🗑️ Solicitudes eliminadas: {total_eliminadas}\n"
+            f"👑 Admin más activo: {escaped_admin_max_name} ({admin_max_count} solicitudes)\n"
+            f"👤 Usuario con más peticiones: {escaped_user_max_name} ({user_max_count} peticiones)\n"
+            "🌟 *Bot de Entreshijos*"
+        )
+
+        try:
+            bot.send_message(chat_id=chat_id, text=graficas_message, parse_mode='Markdown')
+        except telegram.error.BadRequest as e:
+            logger.error(f"❌ Error al enviar mensaje con Markdown en /graficas: {str(e)}")
+            # Fallback to sending without Markdown
+            bot.send_message(chat_id=chat_id, text=graficas_message.replace('*', ''))
+    except Exception as e:
+        logger.error(f"❌ Error en /graficas: {str(e)}")
+        bot.send_message(chat_id=chat_id, text="❌ Ocurrió un error al generar las estadísticas. Por favor, intenta de nuevo más tarde. 🌟", parse_mode='Markdown')
 
 def button_handler(update, context):
     query = update.callback_query
@@ -1228,7 +1255,7 @@ def handle_estado(update, context):
                     f"👥 Admin: {escape_markdown(info['admin_username'])}"
                 )
             else:
-                estado_message = f"📋 *Estado de la solicitud* 🌟\nTicket #{ticket}: No encontrado. 🔍"
+                estado_message = f"❌ Ticket #{ticket} no encontrado. 🌟"
         try:
             bot.send_message(chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
         except telegram.error.BadRequest:
@@ -1236,55 +1263,51 @@ def handle_estado(update, context):
     except ValueError:
         bot.send_message(chat_id=canal_info["chat_id"], text="❗ El ticket debe ser un número válido. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
-# Variable global para selección de grupos
+# Diccionario global para manejar selección de grupos
 grupos_seleccionados = {}
 
 # Registro de handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-dispatcher.add_handler(CommandHandler('on', handle_on))
-dispatcher.add_handler(CommandHandler('off', handle_off))
-dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
-dispatcher.add_handler(CommandHandler('historial', handle_historial))
-dispatcher.add_handler(CommandHandler('go', handle_go))
-dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
-dispatcher.add_handler(CommandHandler('ping', handle_ping))
-dispatcher.add_handler(CommandHandler('subido', handle_subido))
-dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
-dispatcher.add_handler(CommandHandler('restar', handle_restar))
-dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
-dispatcher.add_handler(CommandHandler('graficas', handle_graficas))
-dispatcher.add_handler(CommandHandler('menu', handle_menu))
-dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
-dispatcher.add_handler(CommandHandler('estado', handle_estado))
+dispatcher.add_handler(CommandHandler("on", handle_on))
+dispatcher.add_handler(CommandHandler("off", handle_off))
+dispatcher.add_handler(CommandHandler("grupos", handle_grupos))
+dispatcher.add_handler(CommandHandler("historial", handle_historial))
+dispatcher.add_handler(CommandHandler("go", handle_go))
+dispatcher.add_handler(CommandHandler("eliminar", handle_eliminar))
+dispatcher.add_handler(CommandHandler("ping", handle_ping))
+dispatcher.add_handler(CommandHandler("subido", handle_subido))
+dispatcher.add_handler(CommandHandler("denegado", handle_denegado))
+dispatcher.add_handler(CommandHandler("restar", handle_restar))
+dispatcher.add_handler(CommandHandler("sumar", handle_sumar))
+dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
+dispatcher.add_handler(CommandHandler("menu", handle_menu))
+dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+dispatcher.add_handler(CommandHandler("estado", handle_estado))
 
-# Rutas Flask
+# Configuración del webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        update_json = request.get_json(force=True)
-        if not update_json:
-            logger.error("❌ No se recibió JSON válido")
-            return 'No JSON', 400
-        update = telegram.Update.de_json(update_json, bot)
-        if not update:
-            logger.error("❌ No se pudo deserializar la actualización")
-            return 'Invalid update', 400
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
         dispatcher.process_update(update)
-        return 'ok', 200
+        return 'OK', 200
     except Exception as e:
-        logger.error(f"❌ Error en webhook: {str(e)}")
-        return f'Error: {str(e)}', 500
+        logger.error(f"❌ Error en el webhook: {str(e)}")
+        return 'Error', 500
 
 @app.route('/')
-def health_check():
-    return "✅ Bot de Entreshijos está activo! 🌟", 200
-
-# Inicialización
-init_db()
-for chat_id, title in GRUPOS_PREDEFINIDOS.items():
-    set_grupo_estado(chat_id, title)
+def home():
+    return 'Bot de Entreshijos está funcionando. 🌟'
 
 if __name__ == '__main__':
-    logger.info("🚀 Iniciando bot en modo local")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    try:
+        init_db()
+        for chat_id, title in GRUPOS_PREDEFINIDOS.items():
+            update_grupos_estados(chat_id, title)
+        bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"✅ Webhook configurado en: {WEBHOOK_URL}")
+        app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
+    except Exception as e:
+        logger.error(f"❌ Error al iniciar el bot: {str(e)}")
+        raise
