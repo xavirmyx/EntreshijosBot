@@ -29,37 +29,47 @@ dispatcher = Dispatcher(bot, None, workers=1)
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
 # Base de datos
-def init_db():
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
-                     (user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, chat_id BIGINT, username TEXT, 
-                      last_reset TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS procesado 
-                     (id BIGINT PRIMARY KEY, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
-                     (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS grupos_estados 
-                     (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)''')
-        conn.commit()
-        conn.close()
-        logger.info("Base de datos inicializada correctamente.")
-    except Exception as e:
-        logger.error(f"Error al inicializar la base de datos: {str(e)}")
-        raise
-
 def get_db_connection():
     try:
         return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor)
     except psycopg2.OperationalError as e:
         logger.error(f"Error al conectar a la base de datos: {str(e)}")
+        raise
+
+def check_and_update_table_structure():
+    """Verifica y actualiza la estructura de las tablas en la base de datos."""
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        # Tabla peticiones_por_usuario
+        c.execute("CREATE TABLE IF NOT EXISTS peticiones_por_usuario (user_id BIGINT PRIMARY KEY, count INTEGER DEFAULT 0, chat_id BIGINT, username TEXT)")
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'peticiones_por_usuario'")
+        columns = [row['column_name'] for row in c.fetchall()]
+        if 'last_reset' not in columns:
+            c.execute("ALTER TABLE peticiones_por_usuario ADD COLUMN last_reset TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP")
+            logger.info("Columna 'last_reset' añadida a peticiones_por_usuario.")
+
+        # Tabla peticiones_registradas
+        c.execute("CREATE TABLE IF NOT EXISTS peticiones_registradas (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT)")
+
+        # Tabla historial_solicitudes
+        c.execute("CREATE TABLE IF NOT EXISTS historial_solicitudes (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT)")
+
+        # Tabla procesado
+        c.execute("CREATE TABLE IF NOT EXISTS procesado (id BIGINT PRIMARY KEY, created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP)")
+
+        # Tabla peticiones_incorrectas
+        c.execute("CREATE TABLE IF NOT EXISTS peticiones_incorrectas (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)")
+
+        # Tabla grupos_estados
+        c.execute("CREATE TABLE IF NOT EXISTS grupos_estados (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)")
+
+        conn.commit()
+        conn.close()
+        logger.info("Estructura de la base de datos verificada y actualizada correctamente.")
+    except Exception as e:
+        logger.error(f"Error al verificar/actualizar la base de datos: {str(e)}")
         raise
 
 # Funciones de base de datos
@@ -77,21 +87,25 @@ def increment_ticket_counter():
 
 def get_peticiones_por_usuario(user_id):
     now = datetime.now(SPAIN_TZ)
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT count, chat_id, username, last_reset FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
-        result = c.fetchone()
-        if result:
-            data = dict(result)
-            last_reset = data['last_reset'].astimezone(SPAIN_TZ)
-            if now.date() > last_reset.date():
-                # Reiniciar conteo si ha pasado un día
-                c.execute("UPDATE peticiones_por_usuario SET count = 0, last_reset = %s WHERE user_id = %s", (now, user_id))
-                conn.commit()
-                data['count'] = 0
-                data['last_reset'] = now
-            return data
-        return None
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT count, chat_id, username, last_reset FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
+            result = c.fetchone()
+            if result:
+                data = dict(result)
+                last_reset = data['last_reset'].astimezone(SPAIN_TZ) if data['last_reset'] else now
+                if now.date() > last_reset.date():
+                    c.execute("UPDATE peticiones_por_usuario SET count = 0, last_reset = %s WHERE user_id = %s", (now, user_id))
+                    conn.commit()
+                    data['count'] = 0
+                    data['last_reset'] = now
+                return data
+            return None
+    except psycopg2.errors.UndefinedColumn:
+        logger.warning("Columna faltante detectada, actualizando estructura de la tabla...")
+        check_and_update_table_structure()
+        return get_peticiones_por_usuario(user_id)
 
 def set_peticiones_por_usuario(user_id, count, chat_id, username):
     now = datetime.now(SPAIN_TZ)
@@ -579,7 +593,7 @@ def health_check():
     return "Bot activo 🌟", 200
 
 # Inicialización
-init_db()
+check_and_update_table_structure()
 for chat_id, title in GRUPOS_PREDEFINIDOS.items():
     set_grupo_estado(chat_id, title)
 
