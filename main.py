@@ -590,7 +590,7 @@ def handle_denegado(update, context):
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown')
 
-# Comando /alerta
+# Comando /alerta (Updated)
 def handle_alerta(update, context):
     if not update.message:
         return
@@ -614,6 +614,74 @@ def handle_alerta(update, context):
     bot.send_message(chat_id=chat_id,
                      text="📢 *Seleccionar solicitud para alerta* 🌟\nElige una solicitud activa:",
                      reply_markup=reply_markup, parse_mode='Markdown')
+
+# Manejo de respuestas para /alerta (Updated)
+def handle_alerta_respuesta(update, context):
+    if not update.message or "alerta_ticket" not in context.user_data:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        return
+
+    ticket = context.user_data.get("alerta_ticket")
+    if ticket not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+        del context.user_data["alerta_ticket"]
+        return
+
+    url = message.text.strip()
+    if not url.startswith("https://t.me/"):
+        bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟", parse_mode='Markdown')
+        return
+
+    info = peticiones_registradas[ticket]
+    username_escaped = escape_markdown(info['username'], preserve_username=True)
+    message_text_escaped = escape_markdown(info['message_text'])
+
+    # Notificación al usuario con la URL
+    notificacion = (
+        f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
+        f"Hola {username_escaped}, tu solicitud ha sido procesada:\n"
+        f"📝 *Petición:* {message_text_escaped}\n"
+        f"🔗 *Enlace:* [Ver solicitud resuelta]({url})\n"
+        f"{random.choice(frases_agradecimiento)}"
+    )
+    try:
+        bot.send_message(
+            chat_id=info["chat_id"],
+            text=notificacion,
+            parse_mode='Markdown',
+            message_thread_id=info.get("thread_id")
+        )
+        logger.info(f"Alerta enviada a {info['username']} para Ticket #{ticket} con URL {url}")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Error al enviar alerta a {info['username']}: {str(e)}")
+        bot.send_message(chat_id=chat_id, text=f"⚠️ Error al enviar alerta al usuario: {str(e)}. 🌟", parse_mode='Markdown')
+
+    # Confirmación al admin
+    admin_notificacion = (
+        f"✅ *Alerta enviada* 🌟\n"
+        f"Ticket #{ticket} de {username_escaped} ha sido notificado con la URL:\n"
+        f"[Enlace]({url})"
+    )
+    bot.send_message(chat_id=chat_id, text=admin_notificacion, parse_mode='Markdown')
+
+    # Registrar en historial como "notificado"
+    admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
+    historial_solicitudes[ticket] = {
+        "chat_id": info["chat_id"],
+        "username": info["username"],
+        "message_text": info["message_text"],
+        "chat_title": info["chat_title"],
+        "estado": "notificado",
+        "fecha_gestion": datetime.now(SPAIN_TZ),
+        "admin_username": admin_username
+    }
+    del peticiones_registradas[ticket]
+    del context.user_data["alerta_ticket"]
 
 # Comando /restar (reemplaza a /addplus)
 def handle_restar(update, context):
@@ -1079,54 +1147,22 @@ def button_handler(update, context):
         del historial_solicitudes[ticket]
         query.edit_message_text(text=f"✅ *Ticket #{ticket} restaurado para procesamiento.* 🌟", parse_mode='Markdown')
 
-        # Manejo de /alerta
-        if data.startswith("alerta_select_"):
-            ticket = int(data.split("_")[2])
-            if ticket not in peticiones_registradas:
-                query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
-                return
-            info = peticiones_registradas[ticket]
-            texto = (
-                f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
-                f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
-                f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
-                f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-                "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
-            )
-            query.edit_message_text(text=texto, parse_mode='Markdown')
-            context.user_data["alerta_ticket"] = ticket
-
-# Manejo de respuestas para /alerta
-def handle_alerta_respuesta(update, context):
-    if not update.message or "alerta_ticket" not in context.user_data:
-        return
-
-    message = update.message
-    chat_id = message.chat_id
-
-    if str(chat_id) != GROUP_DESTINO:
-        return
-
-    ticket = context.user_data["alerta_ticket"]
-    if ticket not in peticiones_registradas:
-        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
-        del context.user_data["alerta_ticket"]
-        return
-
-    url = message.text.strip()
-    if not url.startswith("https://t.me/"):
-        bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟", parse_mode='Markdown')
-        return
-
-    info = peticiones_registradas[ticket]
-    notificacion = (
-        f"📢 *Alerta* 🌟\n"
-        f"Hola {escape_markdown(info['username'], True)}, aquí tienes el enlace a tu solicitud:\n"
-        f"[Solicitud #{ticket}]({url})"
-    )
-    bot.send_message(chat_id=info["chat_id"], text=notificacion, parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-    bot.send_message(chat_id=chat_id, text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟", parse_mode='Markdown')
-    del context.user_data["alerta_ticket"]
+    # Manejo de /alerta (Updated)
+    if data.startswith("alerta_select_"):
+        ticket = int(data.split("_")[2])
+        if ticket not in peticiones_registradas:
+            query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+            return
+        info = peticiones_registradas[ticket]
+        texto = (
+            f"📢 *Alerta para Ticket #{ticket}* 🌟\n"
+            f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+            "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+        )
+        query.edit_message_text(text=texto, parse_mode='Markdown')
+        context.user_data["alerta_ticket"] = ticket
 
 # Comando /menu
 def handle_menu(update, context):
@@ -1240,7 +1276,7 @@ dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
-dispatcher.add_handler(MessageHandler(Filters.reply & Filters.text & ~Filters.command, handle_alerta_respuesta))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_alerta_respuesta))
 
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
