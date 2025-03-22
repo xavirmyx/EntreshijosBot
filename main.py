@@ -436,7 +436,7 @@ def handle_historial(update, context):
     historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
     bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
 
-# Comando /recuperar
+# Comando /recuperar (Updated)
 def handle_recuperar(update, context):
     if not update.message:
         return
@@ -526,7 +526,7 @@ def handle_ping(update, context):
 
     bot.send_message(chat_id=chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
 
-# Comando /subido con confirmación
+# Comando /subido (Updated)
 def handle_subido(update, context):
     if not update.message:
         return
@@ -547,16 +547,53 @@ def handle_subido(update, context):
             bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
         info = peticiones_registradas[ticket]
-        keyboard = [
-            [InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_subido_{ticket}")],
-            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        bot.send_message(chat_id=chat_id,
-                         text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como subido?",
-                         reply_markup=reply_markup, parse_mode='Markdown')
+        texto = (
+            f"📋 *Marcar como subido - Ticket #{ticket}* 🌟\n"
+            f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+            f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+            f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+            "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+        )
+        bot.send_message(chat_id=chat_id, text=texto, parse_mode='Markdown')
+        context.user_data["subido_ticket"] = ticket
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown')
+
+# Manejo de respuestas para /subido (New)
+def handle_subido_respuesta(update, context):
+    if not update.message or "subido_ticket" not in context.user_data:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        return
+
+    ticket = context.user_data.get("subido_ticket")
+    if ticket not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+        del context.user_data["subido_ticket"]
+        return
+
+    url = message.text.strip()
+    if not url.startswith("https://t.me/"):
+        bot.send_message(chat_id=chat_id, text="❌ La URL debe ser un enlace válido de Telegram (https://t.me/...). 🌟", parse_mode='Markdown')
+        return
+
+    info = peticiones_registradas[ticket]
+    context.user_data["subido_url"] = url
+    keyboard = [
+        [InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_subido_{ticket}")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    texto = (
+        f"📋 *Confirmar acción* 🌟\n"
+        f"¿Marcar el Ticket #{ticket} de {escape_markdown(info['username'], True)} como subido con la URL:\n"
+        f"[Enlace]({url})?"
+    )
+    bot.send_message(chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
 # Comando /denegado con confirmación
 def handle_denegado(update, context):
@@ -683,42 +720,7 @@ def handle_alerta_respuesta(update, context):
     del peticiones_registradas[ticket]
     del context.user_data["alerta_ticket"]
 
-# Comando /restar (reemplaza a /addplus)
-def handle_restar(update, context):
-    if not update.message:
-        return
-
-    message = update.message
-    chat_id = message.chat_id
-
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
-        return
-
-    args = context.args
-    if len(args) != 2 or not args[0].startswith('@'):
-        bot.send_message(chat_id=chat_id, text="❗ Uso: /restar @username [número] 🌟", parse_mode='Markdown')
-        return
-
-    username = args[0]
-    try:
-        amount = int(args[1])
-        if amount <= 0:
-            bot.send_message(chat_id=chat_id, text="❌ El número debe ser positivo. 🌟", parse_mode='Markdown')
-            return
-    except ValueError:
-        bot.send_message(chat_id=chat_id, text="❗ El segundo argumento debe ser un número. 🌟", parse_mode='Markdown')
-        return
-
-    user_id = next((uid for uid, info in peticiones_por_usuario.items() if info["username"] == username), None)
-    if not user_id:
-        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
-        return
-
-    peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
-    bot.send_message(chat_id=chat_id, text=f"✅ Restadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
-
-# Comando /sumar (reemplaza a /addminus)
+# Comando /sumar (Updated - Previously /restar, now increases capacity)
 def handle_sumar(update, context):
     if not update.message:
         return
@@ -750,10 +752,45 @@ def handle_sumar(update, context):
         bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
         return
 
-    peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
+    peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
     bot.send_message(chat_id=chat_id, text=f"✅ Sumadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
-# Manejo de botones
+# Comando /restar (Updated - Previously /sumar, now reduces capacity)
+def handle_restar(update, context):
+    if not update.message:
+        return
+
+    message = update.message
+    chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+        return
+
+    args = context.args
+    if len(args) != 2 or not args[0].startswith('@'):
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /restar @username [número] 🌟", parse_mode='Markdown')
+        return
+
+    username = args[0]
+    try:
+        amount = int(args[1])
+        if amount <= 0:
+            bot.send_message(chat_id=chat_id, text="❌ El número debe ser positivo. 🌟", parse_mode='Markdown')
+            return
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ El segundo argumento debe ser un número. 🌟", parse_mode='Markdown')
+        return
+
+    user_id = next((uid for uid, info in peticiones_por_usuario.items() if info["username"] == username), None)
+    if not user_id:
+        bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
+        return
+
+    peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
+    bot.send_message(chat_id=chat_id, text=f"✅ Restadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
+
+# Manejo de botones (Updated)
 def button_handler(update, context):
     query = update.callback_query
     if not query:
@@ -772,6 +809,12 @@ def button_handler(update, context):
 
     if data == "cancel_action":
         query.edit_message_text(text="❌ Acción cancelada. 🌟", parse_mode='Markdown')
+        if "subido_ticket" in context.user_data:
+            del context.user_data["subido_ticket"]
+        if "subido_url" in context.user_data:
+            del context.user_data["subido_url"]
+        if "alerta_ticket" in context.user_data:
+            del context.user_data["alerta_ticket"]
         return
 
     # Manejo de /on y /off
@@ -929,15 +972,35 @@ def button_handler(update, context):
             return
 
         if accion in ["subido", "denegado", "eliminar"] and len(data.split("_")) == 3:
-            keyboard = [
-                [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
-                [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            accion_str = {"subido": "subido", "denegado": "denegado", "eliminar": "eliminado"}[accion]
-            texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como {accion_str}?"
-            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-            return
+            if accion == "subido":
+                texto = (
+                    f"📋 *Marcar como subido - Ticket #{ticket}* 🌟\n"
+                    f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
+                    f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
+                    f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
+                    "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+                )
+                query.edit_message_text(text=texto, parse_mode='Markdown')
+                context.user_data["subido_ticket"] = ticket
+                return
+            elif accion == "denegado":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_denegado_confirm")],
+                    [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como denegado?"
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                return
+            elif accion == "eliminar":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_eliminar_confirm")],
+                    [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como eliminado?"
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                return
 
         if len(data.split("_")) == 4 and data.endswith("confirm"):
             accion = data.split("_")[2]
@@ -957,14 +1020,7 @@ def button_handler(update, context):
                 "admin_username": admin_username
             }
 
-            if accion == "subido":
-                notificacion = f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉"
-                bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
-                texto = f"✅ *Ticket #{ticket} procesado como subido.* 🌟"
-                query.edit_message_text(text=texto, parse_mode='Markdown')
-                del peticiones_registradas[ticket]
-
-            elif accion == "denegado":
+            if accion == "denegado":
                 notificacion = f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟"
                 bot.send_message(chat_id=user_chat_id, text=notificacion, parse_mode='Markdown', message_thread_id=thread_id)
                 texto = f"✅ *Ticket #{ticket} procesado como denegado.* 🌟"
@@ -1053,13 +1109,42 @@ def button_handler(update, context):
         query.edit_message_text(text=texto, parse_mode='Markdown')
         del peticiones_registradas[ticket]
 
-    # Manejo de confirmaciones /subido y /denegado
+    # Manejo de confirmaciones /subido (Updated)
     if data.startswith("confirm_subido_"):
         ticket = int(data.split("_")[2])
         if ticket not in peticiones_registradas:
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
+        if "subido_url" not in context.user_data:
+            query.edit_message_text(text="❌ No se proporcionó una URL para el Ticket. 🌟", parse_mode='Markdown')
+            return
+
+        url = context.user_data["subido_url"]
         info = peticiones_registradas[ticket]
+        username_escaped = escape_markdown(info['username'], preserve_username=True)
+        message_text_escaped = escape_markdown(info['message_text'])
+
+        # Notificación al usuario
+        notificacion = (
+            f"✅ *Solicitud Subida - Ticket #{ticket}* 🌟\n"
+            f"Hola {username_escaped}, tu solicitud ha sido subida:\n"
+            f"📝 *Petición:* {message_text_escaped}\n"
+            f"🔗 *Enlace:* [Ver solicitud resuelta]({url})\n"
+            f"{random.choice(frases_agradecimiento)}"
+        )
+        try:
+            bot.send_message(
+                chat_id=info["chat_id"],
+                text=notificacion,
+                parse_mode='Markdown',
+                message_thread_id=info.get("thread_id")
+            )
+            logger.info(f"Notificación de subida enviada a {info['username']} para Ticket #{ticket} con URL {url}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al enviar notificación de subida a {info['username']}: {str(e)}")
+            bot.send_message(chat_id=chat_id, text=f"⚠️ Error al enviar notificación al usuario: {str(e)}. 🌟", parse_mode='Markdown')
+
+        # Registrar en historial como "subido"
         historial_solicitudes[ticket] = {
             "chat_id": info["chat_id"],
             "username": info["username"],
@@ -1069,13 +1154,13 @@ def button_handler(update, context):
             "fecha_gestion": datetime.now(SPAIN_TZ),
             "admin_username": admin_username
         }
-        bot.send_message(chat_id=info["chat_id"],
-                         text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) ha sido subida. 🎉",
-                         parse_mode='Markdown', message_thread_id=info.get("thread_id"))
         bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como subido. 🌟", parse_mode='Markdown')
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como subido.* 🌟", parse_mode='Markdown')
         del peticiones_registradas[ticket]
+        del context.user_data["subido_ticket"]
+        del context.user_data["subido_url"]
 
+    # Manejo de confirmaciones /denegado (Fixed)
     if data.startswith("confirm_denegado_"):
         ticket = int(data.split("_")[2])
         if ticket not in peticiones_registradas:
@@ -1098,7 +1183,7 @@ def button_handler(update, context):
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como denegado.* 🌟", parse_mode='Markdown')
         del peticiones_registradas[ticket]
 
-    # Manejo de /recuperar
+    # Manejo de /recuperar (Updated)
     if data.startswith("recuperar_"):
         ticket = int(data.split("_")[1])
         if ticket not in historial_solicitudes:
@@ -1125,6 +1210,7 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado en el historial. 🌟", parse_mode='Markdown')
             return
         info = historial_solicitudes[ticket]
+        # Restaurar la solicitud a su estado original
         destino_message = (
             "📬 *Solicitud recuperada* 🌟\n"
             f"👤 *Usuario:* {escape_markdown(info['username'], True)} (ID: {info.get('user_id', 'N/A')})\n"
@@ -1164,7 +1250,7 @@ def button_handler(update, context):
         query.edit_message_text(text=texto, parse_mode='Markdown')
         context.user_data["alerta_ticket"] = ticket
 
-# Comando /menu
+# Comando /menu (Updated for /sumar and /restar swap)
 def handle_menu(update, context):
     if not update.message:
         return
@@ -1182,8 +1268,8 @@ def handle_menu(update, context):
         "📋 */pendientes* - Gestionar solicitudes.\n"
         "📢 */alerta* - Enviar alerta con enlace.\n"
         "🔍 */recuperar* - Restaurar solicitudes procesadas.\n"
-        "➖ */restar @username [número]* - Restar peticiones.\n"
-        "➕ */sumar @username [número]* - Sumar peticiones.\n"
+        "➕ */sumar @username [número]* - Aumentar capacidad de peticiones.\n"
+        "➖ */restar @username [número]* - Reducir capacidad de peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
@@ -1257,49 +1343,43 @@ def handle_estado(update, context):
     except ValueError:
         bot.send_message(chat_id=canal_info["chat_id"], text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
-# Añadir handlers
+# Añadir handlers (Updated)
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
-dispatcher.add_handler(CommandHandler('on', handle_on))
-dispatcher.add_handler(CommandHandler('off', handle_off))
-dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
-dispatcher.add_handler(CommandHandler('historial', handle_historial))
-dispatcher.add_handler(CommandHandler('recuperar', handle_recuperar))
-dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
-dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
-dispatcher.add_handler(CommandHandler('ping', handle_ping))
-dispatcher.add_handler(CommandHandler('subido', handle_subido))
-dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
-dispatcher.add_handler(CommandHandler('alerta', handle_alerta))
-dispatcher.add_handler(CommandHandler('restar', handle_restar))
-dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
-dispatcher.add_handler(CommandHandler('menu', handle_menu))
-dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
-dispatcher.add_handler(CommandHandler('estado', handle_estado))
+dispatcher.add_handler(CommandHandler("on", handle_on))
+dispatcher.add_handler(CommandHandler("off", handle_off))
+dispatcher.add_handler(CommandHandler("grupos", handle_grupos))
+dispatcher.add_handler(CommandHandler("historial", handle_historial))
+dispatcher.add_handler(CommandHandler("recuperar", handle_recuperar))
+dispatcher.add_handler(CommandHandler("pendientes", handle_pendientes))
+dispatcher.add_handler(CommandHandler("eliminar", handle_eliminar))
+dispatcher.add_handler(CommandHandler("ping", handle_ping))
+dispatcher.add_handler(CommandHandler("subido", handle_subido))
+dispatcher.add_handler(MessageHandler(Filters.text & Filters.regex(r'^https://t.me/'), handle_subido_respuesta))
+dispatcher.add_handler(CommandHandler("denegado", handle_denegado))
+dispatcher.add_handler(CommandHandler("alerta", handle_alerta))
+dispatcher.add_handler(MessageHandler(Filters.text & Filters.regex(r'^https://t.me/'), handle_alerta_respuesta))
+dispatcher.add_handler(CommandHandler("sumar", handle_sumar))  # Previously /restar, now increases capacity
+dispatcher.add_handler(CommandHandler("restar", handle_restar))  # Previously /sumar, now reduces capacity
+dispatcher.add_handler(CommandHandler("menu", handle_menu))
+dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+dispatcher.add_handler(CommandHandler("estado", handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_alerta_respuesta))
 
-# Rutas Flask
+# Configuración del webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        update_json = request.get_json(force=True)
-        if not update_json:
-            logger.error("No se recibió JSON válido")
-            return 'No JSON', 400
-        update = telegram.Update.de_json(update_json, bot)
-        if not update:
-            logger.error("No se pudo deserializar la actualización")
-            return 'Invalid update', 400
-        dispatcher.process_update(update)
-        return 'ok', 200
-    except Exception as e:
-        logger.error(f"Error en webhook: {str(e)}")
-        return f'Error: {str(e)}', 500
+    update = telegram.Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'OK', 200
 
+# Ruta raíz para verificar que el bot está vivo
 @app.route('/')
-def health_check():
-    return "Bot de Entreshijos está activo! 🌟", 200
+def index():
+    return "Bot is running!", 200
 
+# Iniciar el bot
 if __name__ == '__main__':
-    logger.info("Iniciando bot en modo local")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    # Configurar el webhook
+    bot.setWebhook(f"{WEBHOOK_URL}/webhook")
+    logger.info("Webhook configurado correctamente.")
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))

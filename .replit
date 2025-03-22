@@ -5,6 +5,10 @@ modules = ["python-3.12", "nix"]
 localPort = 5000
 externalPort = 80
 
+[[ports]]
+localPort = 8443
+externalPort = 3000
+
 [deployment]
 run = ["sh", "-c", "python main.py"]
 
