@@ -36,17 +36,17 @@ def init_db():
     try:
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario
                      (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas
+                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT,
                       message_id BIGINT, timestamp TIMESTAMP, chat_title TEXT, thread_id BIGINT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+        c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes
+                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT,
                       chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS procesado 
+        c.execute('''CREATE TABLE IF NOT EXISTS procesado
                      (id BIGINT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
+        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas
                      (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP, chat_id BIGINT)''')
         conn.commit()
         conn.close()
@@ -106,11 +106,11 @@ def get_peticion_registrada(ticket_number):
 def set_peticion_registrada(ticket_number, data):
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("""INSERT INTO peticiones_registradas 
-                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id) 
+        c.execute("""INSERT INTO peticiones_registradas
+                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id)
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = %s, username = %s, message_text = %s, message_id = %s, timestamp = %s, 
+                     ON CONFLICT (ticket_number) DO UPDATE SET
+                     chat_id = %s, username = %s, message_text = %s, message_id = %s, timestamp = %s,
                      chat_title = %s, thread_id = %s""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
                    data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"],
@@ -135,11 +135,11 @@ def get_historial_solicitud(ticket_number):
 def set_historial_solicitud(ticket_number, data):
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("""INSERT INTO historial_solicitudes 
-                     (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username) 
+        c.execute("""INSERT INTO historial_solicitudes
+                     (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username)
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = %s, username = %s, message_text = %s, chat_title = %s, estado = %s, 
+                     ON CONFLICT (ticket_number) DO UPDATE SET
+                     chat_id = %s, username = %s, message_text = %s, chat_title = %s, estado = %s,
                      fecha_gestion = %s, admin_username = %s""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
                    data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"],
@@ -1311,7 +1311,7 @@ def handle_estado(update, context):
     try:
         ticket = int(args[0])
         info = get_peticion_registrada(ticket)
-        if info:
+    if info:
             estado_message = (
                 f"📋 *Estado* 🌟\n"
                 f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
@@ -1373,202 +1373,205 @@ def handle_recuperar(update, context):
                          text="📜 *Solicitudes procesadas* 🌟\nSelecciona una solicitud para recuperarla:",
                          reply_markup=reply_markup, parse_mode='Markdown')
 
-    def handle_tablas(update, context):
-        if not update.message:
-            return
+def handle_tablas(update, context):
+    if not update.message:
+        return
 
-        message = update.message
-        chat_id = message.chat_id
+    message = update.message
+    chat_id = message.chat_id
 
-        if str(chat_id) != GROUP_DESTINO:
-            bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
-            return
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+        return
 
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM peticiones_registradas")
-            pendientes_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM historial_solicitudes")
-            historial_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM peticiones_por_usuario")
-            usuarios_count = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM peticiones_incorrectas")
-            incorrectas_count = c.fetchone()[0]
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM peticiones_registradas")
+        pendientes_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM historial_solicitudes")
+        historial_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM peticiones_por_usuario")
+        usuarios_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM peticiones_incorrectas")
+        incorrectas_count = c.fetchone()[0]
 
-        stats_message = (
-            "📊 *Estadísticas del Bot* 🌟\n"
-            f"📋 *Solicitudes Pendientes:* {pendientes_count}\n"
-            f"📜 *Solicitudes Gestionadas:* {historial_count}\n"
-            f"👥 *Usuarios con Peticiones:* {usuarios_count}\n"
-            f"⚠️ *Peticiones Incorrectas:* {incorrectas_count}\n"
-            "🌟 *Bot de Entreshijos*"
-        )
-        bot.send_message(chat_id=chat_id, text=stats_message, parse_mode='Markdown')
-
-    def handle_recordatorio(update, context):
-        if not update.message:
-            return
-
-        message = update.message
-        chat_id = message.chat_id
-
-        if str(chat_id) != GROUP_DESTINO:
-            bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
-            return
-
-        global auto_remind_enabled
-        status = "activado" if auto_remind_enabled else "desactivado"
-        keyboard = [
-            [InlineKeyboardButton("✅ Activar", callback_data="recordatorio_activar")],
-            [InlineKeyboardButton("❌ Desactivar", callback_data="recordatorio_desactivar")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        bot.send_message(
-            chat_id=chat_id,
-            text=f"⏰ *Recordatorio diario* 🌟\nEstado actual: *{status}*\nSelecciona una opción:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-
-    def handle_userhistory(update, context):
-        if not update.message:
-            return
-
-        message = update.message
-        chat_id = message.chat_id
-
-        if str(chat_id) != GROUP_DESTINO:
-            bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
-            return
-
-        args = context.args
-        if len(args) != 1 or not args[0].startswith('@'):
-            bot.send_message(chat_id=chat_id, text="❗ Uso: /userhistory @username 🌟", parse_mode='Markdown')
-            return
-
-        username = args[0]
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT ticket_number, message_text, chat_title, estado, fecha_gestion "
-                      "FROM historial_solicitudes WHERE username = %s ORDER BY ticket_number DESC", (username,))
-            solicitudes = c.fetchall()
-
-        if not solicitudes:
-            bot.send_message(chat_id=chat_id, text=f"ℹ️ No hay historial para {username}. 🌟", parse_mode='Markdown')
-            return
-
-        historial = []
-        for row in solicitudes:
-            ticket, message_text, chat_title, estado, fecha_gestion = row
-            estado_str = {
-                "subido": "✅ Aceptada",
-                "denegado": "❌ Denegada",
-                "eliminado": "🗑️ Eliminada",
-                "notificado": "📢 Respondida"
-            }.get(estado, "🔄 Desconocido")
-            historial.append(
-                f"🎫 *Ticket #{ticket}* 🌟\n"
-                f"📝 *Mensaje:* {escape_markdown(message_text)}\n"
-                f"🏠 *Grupo:* {escape_markdown(chat_title)}\n"
-                f"📅 *Gestionada:* {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n"
-                f"📌 *Estado:* {estado_str}\n"
+    tablas_message = (
+                "📊 *Estadísticas del Bot* 🌟\n"
+                f"📋 *Solicitudes Pendientes:* {pendientes_count}\n"
+                f"📜 *Solicitudes en Historial:* {historial_count}\n"
+                f"👤 *Usuarios Registrados:* {usuarios_count}\n"
+                f"⚠️ *Peticiones Incorrectas:* {incorrectas_count}\n"
+                "🌟 *Bot de Entreshijos*"
             )
-        historial_message = f"📜 *Historial de {username}* 🌟\n\n" + "\n".join(historial)
-        bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
+            bot.send_message(chat_id=chat_id, text=tablas_message, parse_mode='Markdown')
 
-    def handle_cleanincorrect(update, context):
-        if not update.message:
-            return
+def handle_userhistory(update, context):
+    if not update.message:
+                return
 
-        message = update.message
-        chat_id = message.chat_id
+            message = update.message
+            chat_id = message.chat_id
 
-        if str(chat_id) != GROUP_DESTINO:
-            bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
-            return
+    if str(chat_id) != GROUP_DESTINO:
+                bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+                return
 
-        threshold = datetime.now(SPAIN_TZ) - timedelta(days=1)
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s", (threshold,))
-            deleted = c.rowcount
-            conn.commit()
+            args = context.args
+    if len(args) != 1 or not args[0].startswith('@'):
+                bot.send_message(chat_id=chat_id, text="❗ Uso: /userhistory @username 🌟", parse_mode='Markdown')
+                return
 
-        bot.send_message(chat_id=chat_id, text=f"🧹 *Limpieza completada* 🌟\nSe eliminaron {deleted} peticiones incorrectas antiguas.", parse_mode='Markdown')
-
-    def auto_remind():
-        while True:
-            now = datetime.now(SPAIN_TZ)
-            target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
-            if now > target_time:
-                target_time += timedelta(days=1)
-            time_to_sleep = (target_time - now).total_seconds()
-            time.sleep(time_to_sleep)
-
-            if not auto_remind_enabled:
-                continue
-
-            with get_db_connection() as conn:
+            username = args[0]
+    with get_db_connection() as conn:
                 c = conn.cursor()
-                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                c.execute("SELECT user_id, count FROM peticiones_por_usuario WHERE username = %s", (username,))
+                user_data = c.fetchone()
+                c.execute("SELECT ticket_number, message_text, chat_title, timestamp FROM peticiones_registradas WHERE username = %s ORDER BY timestamp DESC", (username,))
                 pendientes = c.fetchall()
+                c.execute("SELECT ticket_number, message_text, chat_title, estado, fecha_gestion FROM historial_solicitudes WHERE username = %s ORDER BY fecha_gestion DESC", (username,))
+                historial = c.fetchall()
 
-            if not pendientes:
-                bot.send_message(chat_id=GROUP_DESTINO, text="⏰ *Recordatorio diario* 🌟\nNo hay solicitudes pendientes.", parse_mode='Markdown')
-                continue
+    if not user_data and not pendientes and not historial:
+                bot.send_message(chat_id=chat_id, text=f"ℹ️ No se encontró historial para {username}. 🌟", parse_mode='Markdown')
+                return
 
-            pendientes_list = "\n".join([f"🎫 *#{row[0]}* - {row[1]} ({row[2]})" for row in pendientes])
-            reminder_message = (
-                "⏰ *Recordatorio diario* 🌟\n"
-                f"📋 *Solicitudes pendientes ({len(pendientes)}):*\n"
-                f"{pendientes_list}\n"
-                "Usa /pendientes para gestionarlas."
-            )
-            bot.send_message(chat_id=GROUP_DESTINO, text=reminder_message, parse_mode='Markdown')
+            user_id, count = user_data if user_data else (None, 0)
+            historial_msg = [f"👤 *Usuario:* {username} (ID: {user_id})\n📊 *Peticiones realizadas:* {count}/2"]
 
-    # Configuración de comandos y handlers
-    dispatcher.add_handler(CommandHandler("on", handle_on))
-    dispatcher.add_handler(CommandHandler("off", handle_off))
-    dispatcher.add_handler(CommandHandler("grupos", handle_grupos))
-    dispatcher.add_handler(CommandHandler("historial", handle_historial))
-    dispatcher.add_handler(CommandHandler("pendientes", handle_pendientes))
-    dispatcher.add_handler(CommandHandler("eliminar", handle_eliminar))
-    dispatcher.add_handler(CommandHandler("ping", handle_ping))
-    dispatcher.add_handler(CommandHandler("subido", handle_subido))
-    dispatcher.add_handler(CommandHandler("denegado", handle_denegado))
-    dispatcher.add_handler(CommandHandler("restar", handle_restar))
-    dispatcher.add_handler(CommandHandler("sumar", handle_sumar))
-    dispatcher.add_handler(CommandHandler("menu", handle_menu))
-    dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-    dispatcher.add_handler(CommandHandler("estado", handle_estado))
-    dispatcher.add_handler(CommandHandler("tablas", handle_tablas))
-    dispatcher.add_handler(CommandHandler("recordatorio", handle_recordatorio))
-    dispatcher.add_handler(CommandHandler("userhistory", handle_userhistory))
-    dispatcher.add_handler(CommandHandler("cleanincorrect", handle_cleanincorrect))
-    dispatcher.add_handler(CommandHandler("recuperar", handle_recuperar))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    if pendientes:
+                historial_msg.append("\n📋 *Solicitudes Pendientes:*")
+                for row in pendientes:
+                    ticket, message_text, chat_title, timestamp = row
+                    historial_msg.append(
+                        f"🎫 *Ticket #{ticket}*\n"
+                        f"📝 {escape_markdown(message_text)}\n"
+                        f"🏠 {escape_markdown(chat_title)}\n"
+                        f"🕒 {timestamp.strftime('%d/%m/%Y %H:%M:%S')}"
+                    )
 
-    # Configuración del webhook
-    @app.route('/webhook', methods=['POST'])
-    def webhook():
-        update = telegram.Update.de_json(request.get_json(force=True), bot)
-        dispatcher.process_update(update)
-        return 'ok'
+    if historial:
+                historial_msg.append("\n📜 *Historial Gestionado:*")
+                for row in historial:
+                    ticket, message_text, chat_title, estado, fecha_gestion = row
+                    estado_str = {"subido": "✅ Subido", "denegado": "❌ Denegado", "eliminado": "🗑️ Eliminado", "notificado": "📢 Notificado"}.get(estado, "🔄 Desconocido")
+                    historial_msg.append(
+                        f"🎫 *Ticket #{ticket}*\n"
+                        f"📝 {escape_markdown(message_text)}\n"
+                        f"🏠 {escape_markdown(chat_title)}\n"
+                        f"📌 {estado_str}\n"
+                        f"🕒 {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}"
+                    )
 
-    @app.route('/')
-    def index():
-        return 'Bot de Entreshijos está funcionando!'
+            bot.send_message(chat_id=chat_id, text="\n".join(historial_msg), parse_mode='Markdown')
 
-    if __name__ == '__main__':
+def handle_cleanincorrect(update, context):
+    if not update.message:
+             return
+
+            message = update.message
+            chat_id = message.chat_id
+
+    if str(chat_id) != GROUP_DESTINO:
+                bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+            return
+
+threshold = datetime.now(SPAIN_TZ) - timedelta(days=7)
+    with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s RETURNING id", (threshold,))
+                deleted = c.fetchall()
+                conn.commit()
+
+            bot.send_message(chat_id=chat_id, text=f"🧹 *Limpieza completada:* {len(deleted)} peticiones incorrectas antiguas eliminadas. 🌟", parse_mode='Markdown')
+
+def handle_recordatorio(update, context):
+            if not update.message:
+                return
+
+            message = update.message
+            chat_id = message.chat_id
+
+            if str(chat_id) != GROUP_DESTINO:
+                bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
+                return
+
+            keyboard = [
+                [InlineKeyboardButton("⏰ Activar", callback_data="recordatorio_activar")],
+                [InlineKeyboardButton("⏰ Desactivar", callback_data="recordatorio_desactivar")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            estado = "activado" if auto_remind_enabled else "desactivado"
+            bot.send_message(chat_id=chat_id,
+                             text=f"⏰ *Recordatorio diario* 🌟\nEstado actual: {estado}\nSelecciona una opción:",
+                             reply_markup=reply_markup, parse_mode='Markdown')
+
+        def auto_remind():
+            while True:
+                now = datetime.now(SPAIN_TZ)
+                target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
+                if now >= target_time:
+                    target_time += timedelta(days=1)
+                time_to_sleep = (target_time - now).total_seconds()
+                time.sleep(time_to_sleep)
+
+                if auto_remind_enabled:
+                    with get_db_connection() as conn:
+                        c = conn.cursor()
+                        c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                        pendientes = c.fetchall()
+
+                    if pendientes:
+                        pendientes_msg = ["📋 *Resumen diario de pendientes* 🌟"]
+                        for row in pendientes:
+                            ticket, username, chat_title = row
+                            pendientes_msg.append(f"🎫 *#{ticket}* - {escape_markdown(username, True)} ({escape_markdown(chat_title)})")
+                        bot.send_message(chat_id=GROUP_DESTINO, text="\n".join(pendientes_msg), parse_mode='Markdown')
+                    else:
+                        bot.send_message(chat_id=GROUP_DESTINO, text="📋 *Resumen diario de pendientes* 🌟\nNo hay solicitudes pendientes.", parse_mode='Markdown')
+
+        # Registro de handlers
+        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+        dispatcher.add_handler(CommandHandler('on', handle_on))
+        dispatcher.add_handler(CommandHandler('off', handle_off))
+        dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
+        dispatcher.add_handler(CommandHandler('historial', handle_historial))
+        dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
+        dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
+        dispatcher.add_handler(CommandHandler('ping', handle_ping))
+        dispatcher.add_handler(CommandHandler('subido', handle_subido))
+        dispatcher.add_handler(CommandHandler('denegado', handle_denegado))
+        dispatcher.add_handler(CommandHandler('restar', handle_restar))
+        dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
+        dispatcher.add_handler(CommandHandler('menu', handle_menu))
+        dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
+        dispatcher.add_handler(CommandHandler('estado', handle_estado))
+        dispatcher.add_handler(CommandHandler('recuperar', handle_recuperar))
+        dispatcher.add_handler(CommandHandler('tablas', handle_tablas))
+        dispatcher.add_handler(CommandHandler('userhistory', handle_userhistory))
+        dispatcher.add_handler(CommandHandler('cleanincorrect', handle_cleanincorrect))
+        dispatcher.add_handler(CommandHandler('recordatorio', handle_recordatorio))
+        dispatcher.add_handler(CallbackQueryHandler(button_handler))
+
+        # Configuración de Flask para el webhook
+        @app.route('/webhook', methods=['POST'])
+        def webhook():
+            update = telegram.Update.de_json(request.get_json(force=True), bot)
+            if update:
+                dispatcher.process_update(update)
+            return 'ok'
+
+        @app.route('/')
+        def index():
+            return 'Bot is running!'
+
+        # Inicialización y configuración del webhook
         init_db()
         bot.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook configurado en {WEBHOOK_URL}")
+        logger.info(f"Webhook configurado en: {WEBHOOK_URL}")
 
         # Iniciar el hilo para el recordatorio automático
         remind_thread = threading.Thread(target=auto_remind, daemon=True)
         remind_thread.start()
 
-        # Iniciar Flask
-        port = int(os.getenv('PORT', 5000))
-        app.run(host='0.0.0.0', port=port)
+        if __name__ == '__main__':
+            app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
