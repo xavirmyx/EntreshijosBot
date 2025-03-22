@@ -537,10 +537,12 @@ def handle_subido(update, context):
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino (-1002641818457). 🌟", parse_mode='Markdown')
         return
+
     args = context.args
     if len(args) != 1:
         bot.send_message(chat_id=chat_id, text="❗ Uso: /subido [ticket] 🌟", parse_mode='Markdown')
         return
+
     try:
         ticket = int(args[0])
         if ticket not in peticiones_registradas:
@@ -552,14 +554,14 @@ def handle_subido(update, context):
             f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
             f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
             f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-            "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+            "Por favor, envía la URL de la solicitud subida (https://t.me/...) en un mensaje nuevo:"
         )
         bot.send_message(chat_id=chat_id, text=texto, parse_mode='Markdown')
         context.user_data["subido_ticket"] = ticket
     except ValueError:
         bot.send_message(chat_id=chat_id, text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown')
 
-# Manejo de respuestas para /subido (New)
+# Manejo de respuestas para /subido (Updated)
 def handle_subido_respuesta(update, context):
     if not update.message or "subido_ticket" not in context.user_data:
         return
@@ -590,10 +592,11 @@ def handle_subido_respuesta(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     texto = (
         f"📋 *Confirmar acción* 🌟\n"
-        f"¿Marcar el Ticket #{ticket} de {escape_markdown(info['username'], True)} como subido con la URL:\n"
-        f"[Enlace]({url})?"
+        f"¿Marcar el Ticket #{ticket} de {escape_markdown(info['username'], True)} como subido?\n"
+        f"🔗 *URL proporcionada:* [Ver solicitud subida]({url})"
     )
     bot.send_message(chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+    del context.user_data["subido_ticket"]
 
 # Comando /denegado con confirmación
 def handle_denegado(update, context):
@@ -720,7 +723,7 @@ def handle_alerta_respuesta(update, context):
     del peticiones_registradas[ticket]
     del context.user_data["alerta_ticket"]
 
-# Comando /sumar (Updated - Previously /restar, now increases capacity)
+# Comando /sumar (Updated - Previously /restar, now increases petition count)
 def handle_sumar(update, context):
     if not update.message:
         return
@@ -752,10 +755,10 @@ def handle_sumar(update, context):
         bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
         return
 
-    peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
+    peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
     bot.send_message(chat_id=chat_id, text=f"✅ Sumadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
-# Comando /restar (Updated - Previously /sumar, now reduces capacity)
+# Comando /restar (Updated - Previously /sumar, now reduces petition count)
 def handle_restar(update, context):
     if not update.message:
         return
@@ -787,10 +790,10 @@ def handle_restar(update, context):
         bot.send_message(chat_id=chat_id, text=f"❌ {username} no encontrado en las peticiones. 🌟", parse_mode='Markdown')
         return
 
-    peticiones_por_usuario[user_id]["count"] += amount  # Suma para reducir capacidad
+    peticiones_por_usuario[user_id]["count"] = max(0, peticiones_por_usuario[user_id]["count"] - amount)  # Resta para aumentar capacidad
     bot.send_message(chat_id=chat_id, text=f"✅ Restadas {amount} peticiones a {username}. Nuevo conteo: {peticiones_por_usuario[user_id]['count']}/2 🌟", parse_mode='Markdown')
 
-# Manejo de botones (Updated)
+# Manejo de botones
 def button_handler(update, context):
     query = update.callback_query
     if not query:
@@ -809,12 +812,8 @@ def button_handler(update, context):
 
     if data == "cancel_action":
         query.edit_message_text(text="❌ Acción cancelada. 🌟", parse_mode='Markdown')
-        if "subido_ticket" in context.user_data:
-            del context.user_data["subido_ticket"]
         if "subido_url" in context.user_data:
             del context.user_data["subido_url"]
-        if "alerta_ticket" in context.user_data:
-            del context.user_data["alerta_ticket"]
         return
 
     # Manejo de /on y /off
@@ -978,29 +977,21 @@ def button_handler(update, context):
                     f"👤 *Usuario:* {escape_markdown(info['username'], True)}\n"
                     f"📝 *Mensaje:* {escape_markdown(info['message_text'])}\n"
                     f"🏠 *Grupo:* {escape_markdown(info['chat_title'])}\n"
-                    "Por favor, envía la URL de la solicitud resuelta (https://t.me/...) en un mensaje nuevo:"
+                    "Por favor, envía la URL de la solicitud subida (https://t.me/...) en un mensaje nuevo:"
                 )
                 query.edit_message_text(text=texto, parse_mode='Markdown')
                 context.user_data["subido_ticket"] = ticket
                 return
-            elif accion == "denegado":
+            else:
                 keyboard = [
-                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_denegado_confirm")],
+                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
                     [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
-                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como denegado?"
+                accion_str = {"subido": "subido", "denegado": "denegado", "eliminado": "eliminado"}[accion]
+                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como {accion_str}?"
                 query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                return
-            elif accion == "eliminar":
-                keyboard = [
-                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_eliminar_confirm")],
-                    [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} de {info['username']} como eliminado?"
-                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                return
+            return
 
         if len(data.split("_")) == 4 and data.endswith("confirm"):
             accion = data.split("_")[2]
@@ -1116,35 +1107,11 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
         if "subido_url" not in context.user_data:
-            query.edit_message_text(text="❌ No se proporcionó una URL para el Ticket. 🌟", parse_mode='Markdown')
+            query.edit_message_text(text="❌ No se proporcionó una URL válida. Por favor, intenta de nuevo con /subido. 🌟", parse_mode='Markdown')
             return
 
         url = context.user_data["subido_url"]
         info = peticiones_registradas[ticket]
-        username_escaped = escape_markdown(info['username'], preserve_username=True)
-        message_text_escaped = escape_markdown(info['message_text'])
-
-        # Notificación al usuario
-        notificacion = (
-            f"✅ *Solicitud Subida - Ticket #{ticket}* 🌟\n"
-            f"Hola {username_escaped}, tu solicitud ha sido subida:\n"
-            f"📝 *Petición:* {message_text_escaped}\n"
-            f"🔗 *Enlace:* [Ver solicitud resuelta]({url})\n"
-            f"{random.choice(frases_agradecimiento)}"
-        )
-        try:
-            bot.send_message(
-                chat_id=info["chat_id"],
-                text=notificacion,
-                parse_mode='Markdown',
-                message_thread_id=info.get("thread_id")
-            )
-            logger.info(f"Notificación de subida enviada a {info['username']} para Ticket #{ticket} con URL {url}")
-        except telegram.error.TelegramError as e:
-            logger.error(f"Error al enviar notificación de subida a {info['username']}: {str(e)}")
-            bot.send_message(chat_id=chat_id, text=f"⚠️ Error al enviar notificación al usuario: {str(e)}. 🌟", parse_mode='Markdown')
-
-        # Registrar en historial como "subido"
         historial_solicitudes[ticket] = {
             "chat_id": info["chat_id"],
             "username": info["username"],
@@ -1154,13 +1121,23 @@ def button_handler(update, context):
             "fecha_gestion": datetime.now(SPAIN_TZ),
             "admin_username": admin_username
         }
+        notificacion = (
+            f"✅ *Solicitud subida - Ticket #{ticket}* 🌟\n"
+            f"Hola {escape_markdown(info['username'], True)}, tu solicitud ha sido subida:\n"
+            f"📝 *Petición:* {escape_markdown(info['message_text'])}\n"
+            f"🔗 *Enlace:* [Ver solicitud subida]({url})\n"
+            f"{random.choice(frases_agradecimiento)}"
+        )
+        bot.send_message(chat_id=info["chat_id"],
+                         text=notificacion,
+                         parse_mode='Markdown',
+                         message_thread_id=info.get("thread_id"))
         bot.send_message(chat_id=chat_id, text=f"✅ Ticket #{ticket} marcado como subido. 🌟", parse_mode='Markdown')
         query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como subido.* 🌟", parse_mode='Markdown')
         del peticiones_registradas[ticket]
-        del context.user_data["subido_ticket"]
         del context.user_data["subido_url"]
 
-    # Manejo de confirmaciones /denegado (Fixed)
+    # Manejo de confirmaciones /denegado
     if data.startswith("confirm_denegado_"):
         ticket = int(data.split("_")[2])
         if ticket not in peticiones_registradas:
@@ -1210,7 +1187,6 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado en el historial. 🌟", parse_mode='Markdown')
             return
         info = historial_solicitudes[ticket]
-        # Restaurar la solicitud a su estado original
         destino_message = (
             "📬 *Solicitud recuperada* 🌟\n"
             f"👤 *Usuario:* {escape_markdown(info['username'], True)} (ID: {info.get('user_id', 'N/A')})\n"
@@ -1250,7 +1226,7 @@ def button_handler(update, context):
         query.edit_message_text(text=texto, parse_mode='Markdown')
         context.user_data["alerta_ticket"] = ticket
 
-# Comando /menu (Updated for /sumar and /restar swap)
+# Comando /menu
 def handle_menu(update, context):
     if not update.message:
         return
@@ -1268,8 +1244,8 @@ def handle_menu(update, context):
         "📋 */pendientes* - Gestionar solicitudes.\n"
         "📢 */alerta* - Enviar alerta con enlace.\n"
         "🔍 */recuperar* - Restaurar solicitudes procesadas.\n"
-        "➕ */sumar @username [número]* - Aumentar capacidad de peticiones.\n"
-        "➖ */restar @username [número]* - Reducir capacidad de peticiones.\n"
+        "➖ */restar @username [número]* - Restar peticiones.\n"
+        "➕ */sumar @username [número]* - Sumar peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
@@ -1364,22 +1340,28 @@ dispatcher.add_handler(CommandHandler("menu", handle_menu))
 dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
 dispatcher.add_handler(CommandHandler("estado", handle_estado))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
-
-# Configuración del webhook
+# Rutas Flask
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    update = telegram.Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
-    return 'OK', 200
+    try:
+        update_json = request.get_json(force=True)
+        if not update_json:
+            logger.error("No se recibió JSON válido")
+            return 'No JSON', 400
+        update = telegram.Update.de_json(update_json, bot)
+        if not update:
+            logger.error("No se pudo deserializar la actualización")
+            return 'Invalid update', 400
+        dispatcher.process_update(update)
+        return 'ok', 200
+    except Exception as e:
+        logger.error(f"Error en webhook: {str(e)}")
+        return f'Error: {str(e)}', 500
 
-# Ruta raíz para verificar que el bot está vivo
 @app.route('/')
-def index():
-    return "Bot is running!", 200
+def health_check():
+    return "Bot de Entreshijos está activo! 🌟", 200
 
-# Iniciar el bot
 if __name__ == '__main__':
-    # Configurar el webhook
-    bot.setWebhook(f"{WEBHOOK_URL}/webhook")
-    logger.info("Webhook configurado correctamente.")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
+    logger.info("Iniciando bot en modo local")
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
