@@ -9,6 +9,7 @@ import random
 import logging
 import psycopg2
 from psycopg2.extras import DictCursor
+import re
 
 # Configuración inicial
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
@@ -218,6 +219,15 @@ def escape_markdown(text, preserve_username=False):
         text = text.replace(char, f'\\{char}')
     text = text.encode('ascii', 'ignore').decode('ascii')
     return text
+
+def remove_emojis(text):
+    emoji_pattern = re.compile("["
+                               u"\U0001F600-\U0001F64F"  # Emoticonos
+                               u"\U0001F300-\U0001F5FF"  # Símbolos y pictogramas
+                               u"\U0001F680-\U0001F6FF"  # Transporte y mapas
+                               u"\U0001F700-\U0001F77F"  # Símbolos adicionales
+                               "]+", flags=re.UNICODE)
+    return emoji_pattern.sub(r'', text)
 
 def update_grupos_estados(chat_id, title=None):
     grupos = get_grupos_estados()
@@ -514,19 +524,37 @@ def handle_go(update, context):
     message = update.message
     chat_id = message.chat_id
     if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
+        context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Este comando solo puede usarse en el grupo destino. 🌟",
+            parse_mode='Markdown'
+        )
         return
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+        c.execute("SELECT ticket_number, chat_title, username FROM peticiones_registradas ORDER BY ticket_number")
         pendientes = c.fetchall()
     if not pendientes:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes en este momento. 🌟", parse_mode='Markdown')
+        context.bot.send_message(
+            chat_id=chat_id,
+            text="ℹ️ No hay solicitudes pendientes en este momento. 🌟",
+            parse_mode='Markdown'
+        )
         return
-    keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username, True)} ({escape_markdown(chat_title)})",
-                                    callback_data=f"pend_{ticket}")] for ticket, username, chat_title in pendientes]
+    keyboard = []
+    for ticket, chat_title, username in pendientes:
+        clean_chat_title = remove_emojis(chat_title)
+        escaped_chat_title = escape_markdown(clean_chat_title)
+        escaped_username = escape_markdown(username, preserve_username=True)
+        button_text = f"#{ticket} - {escaped_chat_title} - {escaped_username}"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
     reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id, text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionar:", reply_markup=reply_markup, parse_mode='Markdown')
+    context.bot.send_message(
+        chat_id=chat_id,
+        text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionar:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
 
 def handle_eliminar(update, context):
     if not update.message:
