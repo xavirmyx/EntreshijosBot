@@ -1096,12 +1096,10 @@ def button_handler(update, context):
         query.edit_message_text(text=texto, parse_mode='Markdown')
         context.user_data["alerta_ticket"] = ticket
         context.user_data["alerta_chat_id"] = chat_id  # Guardar el chat_id para validar
-        logger.info(f"Ticket #{ticket} seleccionado para alerta, esperando URL")
 
 # Manejo de respuestas para /alerta
 def handle_alerta_respuesta(update, context):
     if not update.message:
-        logger.info("No hay mensaje en la actualización")
         return
 
     message = update.message
@@ -1109,21 +1107,15 @@ def handle_alerta_respuesta(update, context):
 
     # Verificar si estamos esperando una respuesta para /alerta
     if "alerta_ticket" not in context.user_data or "alerta_chat_id" not in context.user_data:
-        logger.info("No se encontró alerta_ticket o alerta_chat_id en context.user_data")
         return
 
     # Validar que el mensaje proviene del chat correcto
     if str(chat_id) != str(context.user_data["alerta_chat_id"]):
-        logger.info(f"Mensaje recibido en chat incorrecto: {chat_id}, esperado: {context.user_data['alerta_chat_id']}")
         return
 
-    ticket = context.user_data.get("alerta_ticket")
-    if ticket is None or ticket not in peticiones_registradas:
-        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado o sesión expirada. Usa /alerta nuevamente. 🌟", parse_mode='Markdown')
-        if "alerta_ticket" in context.user_data:
-            del context.user_data["alerta_ticket"]
-        if "alerta_chat_id" in context.user_data:
-            del context.user_data["alerta_chat_id"]
+    ticket = context.user_data["alerta_ticket"]
+    if ticket not in peticiones_registradas:
+        bot.send_message(chat_id=chat_id, text=f"❌ Ticket #{ticket} no encontrado. Usa /alerta nuevamente. 🌟", parse_mode='Markdown')
         return
 
     url = message.text.strip()
@@ -1138,31 +1130,17 @@ def handle_alerta_respuesta(update, context):
         f"[Solicitud #{ticket}]({url})\n"
         f"{random.choice(frases_agradecimiento)}"
     )
-    try:
-        bot.send_message(
-            chat_id=info["chat_id"],
-            text=notificacion,
-            parse_mode='Markdown',
-            message_thread_id=info.get("thread_id")
-        )
-        bot.send_message(
-            chat_id=chat_id,
-            text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟",
-            parse_mode='Markdown'
-        )
-        logger.info(f"Alerta enviada para Ticket #{ticket} a {info['username']} con URL {url}")
-    except telegram.error.TelegramError as e:
-        bot.send_message(
-            chat_id=chat_id,
-            text=f"⚠️ Error al enviar la alerta: {str(e)}. Por favor, intenta de nuevo. 🌟",
-            parse_mode='Markdown'
-        )
-        logger.error(f"Error al enviar alerta para Ticket #{ticket}: {str(e)}")
-    finally:
-        if "alerta_ticket" in context.user_data:
-            del context.user_data["alerta_ticket"]
-        if "alerta_chat_id" in context.user_data:
-            del context.user_data["alerta_chat_id"]
+    bot.send_message(
+        chat_id=info["chat_id"],
+        text=notificacion,
+        parse_mode='Markdown',
+        message_thread_id=info.get("thread_id")
+    )
+    bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ Alerta enviada a {escape_markdown(info['username'], True)} con el enlace {url}. 🌟",
+        parse_mode='Markdown'
+    )
 
 # Comando /menu
 def handle_menu(update, context):
@@ -1291,29 +1269,19 @@ dispatcher.add_handler(MessageHandler(Filters.text, handle_message))
 # Ruta para el webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        update = telegram.Update.de_json(request.get_json(force=True), bot)
-        if update:
-            dispatcher.process_update(update)
-        else:
-            logger.error("No se pudo procesar la actualización: update es None")
-        return 'ok', 200
-    except Exception as e:
-        logger.error(f"Error en el webhook: {str(e)}")
-        return 'error', 500
+    update = telegram.Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
+    return 'ok'
 
 # Configurar el webhook
 def set_webhook():
-    try:
-        webhook_info = bot.get_webhook_info()
-        if webhook_info.url != WEBHOOK_URL:
-            bot.delete_webhook()
-            bot.set_webhook(url=WEBHOOK_URL)
-            logger.info(f"Webhook configurado en {WEBHOOK_URL}")
-        else:
-            logger.info("Webhook ya configurado correctamente")
-    except telegram.error.TelegramError as e:
-        logger.error(f"Error al configurar el webhook: {str(e)}")
+    webhook_info = bot.get_webhook_info()
+    if webhook_info.url != WEBHOOK_URL:
+        bot.delete_webhook()
+        bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook configurado en {WEBHOOK_URL}")
+    else:
+        logger.info("Webhook ya configurado correctamente")
 
 # Ruta raíz para verificar que el servidor está activo
 @app.route('/')
