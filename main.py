@@ -83,7 +83,7 @@ def get_peticiones_por_usuario(user_id):
             result_dict = dict(result)
             now = datetime.now(SPAIN_TZ)
             last_reset = result_dict['last_reset'].astimezone(SPAIN_TZ) if result_dict['last_reset'] else None
-            if not last_reset or (now - last_reset).total_seconds() >= 86400:  # 86400 seconds = 1 day
+            if not last_reset or (now - last_reset).total_seconds() >= 86400:  # 86400 segundos = 1 día
                 result_dict['count'] = 0
                 result_dict['last_reset'] = now
                 set_peticiones_por_usuario(user_id, 0, result_dict['chat_id'], result_dict['username'], now)
@@ -222,11 +222,9 @@ def escape_markdown(text, preserve_username=False):
         return text
     if preserve_username and text.startswith('@'):
         return text
-    # Lista ampliada de caracteres a escapar
     characters_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in characters_to_escape:
         text = text.replace(char, f'\\{char}')
-    # Reemplazar caracteres unicode problemáticos
     text = text.encode('ascii', 'ignore').decode('ascii')
     return text
 
@@ -240,13 +238,6 @@ def update_grupos_estados(chat_id, title=None):
 
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
-
-def send_animation(chat_id, message, steps=["🏃‍♂️ Procesando...", "⏳ Casi listo...", "✅ ¡Hecho!"]):
-    """Envía una animación de pasos en el chat."""
-    for step in steps:
-        msg = bot.send_message(chat_id=chat_id, text=step, parse_mode='Markdown')
-        bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-    return bot.send_message(chat_id=chat_id, text=steps[-1], parse_mode='Markdown')
 
 # Función para manejar mensajes
 def handle_message(update, context):
@@ -494,7 +485,7 @@ def handle_historial(update, context):
             "notificado": "📢 Respondida",
             "limite_excedido": "🚫 Límite excedido"
         }.get(estado, "🔄 Desconocido")
-        historial.append(
+        entry = (
             f"🎫 *Ticket #{ticket}*\n"
             f"👤 Usuario: {escape_markdown(username, True)}\n"
             f"📝 Mensaje: {escape_markdown(message_text)}\n"
@@ -503,13 +494,26 @@ def handle_historial(update, context):
             f"👥 Admin: {escape_markdown(admin_username)}\n"
             f"📌 Estado: {estado_str}\n"
         )
-    historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
-    try:
-        bot.send_message(chat_id=chat_id, text=historial_message, parse_mode='Markdown')
-    except telegram.error.BadRequest:
-        bot.send_message(chat_id=chat_id, text=historial_message.replace('*', ''))
+        historial.append(entry)
 
-def handle_pendientes(update, context):
+    # Dividir el historial en mensajes de menos de 4000 caracteres
+    messages = []
+    current_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n"
+    for entry in historial:
+        if len(current_message) + len(entry) + 1 > 4000:
+            messages.append(current_message)
+            current_message = "📜 *Continuación del Historial* 🌟\n\n"
+        current_message += entry + "\n"
+    if current_message:
+        messages.append(current_message)
+
+    for msg in messages:
+        try:
+            bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+        except telegram.error.BadRequest:
+            bot.send_message(chat_id=chat_id, text=msg.replace('*', ''))
+
+def handle_go(update, context):
     if not update.message:
         return
     message = update.message
@@ -524,8 +528,8 @@ def handle_pendientes(update, context):
     if not pendientes:
         bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
         return
-    keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username)} ({escape_markdown(chat_title)})",
-                                    callback_data=f"pend_{ticket}")] for ticket, username, chat_title in pendientes]
+    keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username)} ({escape_markdown(chat_title[:20])}...)",
+                                    callback_data=f"go_{ticket}")] for ticket, username, chat_title in pendientes]
     reply_markup = InlineKeyboardMarkup(keyboard)
     bot.send_message(chat_id=chat_id, text="📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud:", reply_markup=reply_markup, parse_mode='Markdown')
 
@@ -680,6 +684,67 @@ def handle_sumar(update, context):
         conn.commit()
     bot.send_message(chat_id=chat_id, text=f"✅ Sumadas {amount} peticiones a {escape_markdown(username)}. Nuevo conteo: {new_count}/2 🌟", parse_mode='Markdown')
 
+def handle_estado_bot(update, context):
+    if not update.message:
+        return
+    message = update.message
+    chat_id = message.chat_id
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
+        return
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        # Total solicitudes recibidas
+        c.execute("SELECT COUNT(*) FROM peticiones_registradas")
+        pendientes = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM historial_solicitudes")
+        gestionadas = c.fetchone()[0]
+        total_recibidas = pendientes + gestionadas
+        # Solicitudes aceptadas
+        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'subido'")
+        aceptadas = c.fetchone()[0]
+        # Solicitudes denegadas
+        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'denegado'")
+        denegadas = c.fetchone()[0]
+        # Solicitudes eliminadas
+        c.execute("SELECT COUNT(*) FROM historial_solicitudes WHERE estado = 'eliminado'")
+        eliminadas = c.fetchone()[0]
+        # Admin que más ha respondido
+        c.execute("SELECT admin_username, COUNT(*) as count FROM historial_solicitudes GROUP BY admin_username ORDER BY count DESC LIMIT 1")
+        admin_max = c.fetchone()
+        admin_max_name = admin_max['admin_username'] if admin_max else "N/A"
+        admin_max_count = admin_max['count'] if admin_max else 0
+        # Usuario que más ha pedido
+        c.execute("SELECT username, COUNT(*) as count FROM peticiones_registradas GROUP BY username")
+        usuarios_pendientes = c.fetchall()
+        c.execute("SELECT username, COUNT(*) as count FROM historial_solicitudes GROUP BY username")
+        usuarios_historial = c.fetchall()
+        usuarios_total = {}
+        for u in usuarios_pendientes:
+            usuarios_total[u['username']] = usuarios_total.get(u['username'], 0) + u['count']
+        for u in usuarios_historial:
+            usuarios_total[u['username']] = usuarios_total.get(u['username'], 0) + u['count']
+        if usuarios_total:
+            usuario_max = max(usuarios_total, key=usuarios_total.get)
+            usuario_max_count = usuarios_total[usuario_max]
+        else:
+            usuario_max = "N/A"
+            usuario_max_count = 0
+    estado_message = (
+        f"📊 *Estadísticas del Bot* 🌟\n"
+        f"🔢 *Total solicitudes recibidas:* {total_recibidas}\n"
+        f"✅ *Solicitudes aceptadas:* {aceptadas}\n"
+        f"❌ *Solicitudes denegadas:* {denegadas}\n"
+        f"🗑️ *Solicitudes eliminadas:* {eliminadas}\n"
+        f"👑 *Admin más activo:* {escape_markdown(admin_max_name)} ({admin_max_count} respuestas)\n"
+        f"🏆 *Usuario más activo:* {escape_markdown(usuario_max)} ({usuario_max_count} peticiones)\n"
+        "🌟 *Bot de Entreshijos*"
+    )
+    try:
+        bot.send_message(chat_id=chat_id, text=estado_message, parse_mode='Markdown')
+    except telegram.error.BadRequest:
+        bot.send_message(chat_id=chat_id, text=estado_message.replace('*', ''))
+
 def button_handler(update, context):
     query = update.callback_query
     if not query:
@@ -816,14 +881,14 @@ def button_handler(update, context):
                 query.edit_message_text(text=texto.replace('*', ''), reply_markup=reply_markup)
             return
 
-    if data.startswith("pend_"):
-        if data == "pend_regresar":
+    if data.startswith("go_"):
+        if data == "go_regresar":
             with get_db_connection() as conn:
                 c = conn.cursor()
                 c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
                 pendientes = c.fetchall()
-            keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username)} ({escape_markdown(chat_title)})",
-                                             callback_data=f"pend_{ticket}")] for ticket, username, chat_title in pendientes]
+            keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username)} ({escape_markdown(chat_title[:20])}...)",
+                                             callback_data=f"go_{ticket}")] for ticket, username, chat_title in pendientes]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud:"
             try:
@@ -835,7 +900,7 @@ def button_handler(update, context):
         try:
             ticket = int(data.split("_")[1])
         except (IndexError, ValueError):
-            logger.error(f"Error al procesar ticket en callback pend_: {data}")
+            logger.error(f"Error al procesar ticket en callback go_: {data}")
             return
 
         info = get_peticion_registrada(ticket)
@@ -845,10 +910,10 @@ def button_handler(update, context):
 
         if len(data.split("_")) == 2:
             keyboard = [
-                [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
-                [InlineKeyboardButton("❌ Denegado", callback_data=f"pend_{ticket}_denegado")],
-                [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"pend_{ticket}_eliminar")],
-                [InlineKeyboardButton("🔙 Regresar", callback_data="pend_regresar")]
+                [InlineKeyboardButton("✅ Subido", callback_data=f"go_{ticket}_subido")],
+                [InlineKeyboardButton("❌ Denegado", callback_data=f"go_{ticket}_denegado")],
+                [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"go_{ticket}_eliminar")],
+                [InlineKeyboardButton("🔙 Regresar", callback_data="go_regresar")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = (
@@ -868,12 +933,12 @@ def button_handler(update, context):
         try:
             accion = data.split("_")[2]
         except IndexError:
-            logger.error(f"Error al procesar acción en callback pend_: {data}")
+            logger.error(f"Error al procesar acción en callback go_: {data}")
             return
 
         if accion in ["subido", "denegado", "eliminar"] and len(data.split("_")) == 3:
             keyboard = [
-                [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
+                [InlineKeyboardButton("✅ Confirmar", callback_data=f"go_{ticket}_{accion}_confirm")],
                 [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_action")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -892,9 +957,6 @@ def button_handler(update, context):
             user_chat_id = info["chat_id"]
             message_id = info["message_id"]
             thread_id = info.get("thread_id")
-
-            # Animación de procesamiento
-            send_animation(chat_id, "Procesando solicitud...")
 
             set_historial_solicitud(ticket, {
                 "chat_id": user_chat_id,
@@ -988,9 +1050,6 @@ def button_handler(update, context):
         message_id = info["message_id"]
         thread_id = info.get("thread_id")
 
-        # Animación de procesamiento
-        send_animation(chat_id, "Eliminando solicitud...")
-
         set_historial_solicitud(ticket, {
             "chat_id": user_chat_id,
             "username": username,
@@ -1040,8 +1099,6 @@ def button_handler(update, context):
         if not info:
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
-        # Animación de procesamiento
-        send_animation(chat_id, "Subiendo solicitud...")
         set_historial_solicitud(ticket, {
             "chat_id": info["chat_id"],
             "username": info["username"],
@@ -1067,8 +1124,6 @@ def button_handler(update, context):
         if not info:
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
-        # Animación de procesamiento
-        send_animation(chat_id, "Denegando solicitud...")
         set_historial_solicitud(ticket, {
             "chat_id": info["chat_id"],
             "username": info["username"],
@@ -1101,13 +1156,14 @@ def handle_menu(update, context):
         "🔧 *Usuarios:*\n"
         "✅ */solicito*, */peticion*, etc. - Enviar solicitud (máx. 2/día).\n"
         "🔧 *Comandos en grupo destino:*\n"
-        "📋 */pendientes* - Gestionar solicitudes.\n"
+        "📋 */go* - Gestionar solicitudes.\n"
         "➖ */restar @username [número]* - Restar peticiones.\n"
         "➕ */sumar @username [número]* - Sumar peticiones.\n"
         "🟢 */on* - Activar solicitudes.\n"
         "🔴 */off* - Desactivar solicitudes.\n"
         "🏠 */grupos* - Ver estado de grupos.\n"
         "📜 */historial* - Ver solicitudes gestionadas.\n"
+        "📊 */estado* - Ver estadísticas del bot.\n"
         "🏓 */ping* - Verificar bot.\n"
         "🌟 *Bot de Entreshijos*"
     )
@@ -1189,7 +1245,7 @@ dispatcher.add_handler(CommandHandler('on', handle_on))
 dispatcher.add_handler(CommandHandler('off', handle_off))
 dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
 dispatcher.add_handler(CommandHandler('historial', handle_historial))
-dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
+dispatcher.add_handler(CommandHandler('go', handle_go))
 dispatcher.add_handler(CommandHandler('eliminar', handle_eliminar))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('subido', handle_subido))
@@ -1199,6 +1255,7 @@ dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
+dispatcher.add_handler(CommandHandler('estado', handle_estado_bot))  # Renombrado como handle_estado_bot para evitar conflicto
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
 # Rutas Flask (sin cambios)
