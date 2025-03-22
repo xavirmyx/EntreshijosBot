@@ -269,7 +269,7 @@ def handle_message(update, context):
             notificacion = f"🚫 {username_escaped}, las solicitudes solo son válidas en el canal de peticiones correspondiente. 🌟"
             warn_message = f"/warn {username_escaped} Petición fuera del canal correspondiente."
             bot.send_message(chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
+            bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)  # Send warn in main chat
             logger.info(f"Solicitud de {username} denegada: fuera del canal correcto")
             return
 
@@ -279,28 +279,13 @@ def handle_message(update, context):
             logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
-        user_data = get_peticiones_por_usuario(user_id)
-        if not user_data:
-            set_peticiones_por_usuario(user_id, 1, chat_id, username)
-            user_data = {"count": 1, "chat_id": chat_id, "username": username}
-        else:
-            user_data["count"] += 1
-            set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
-
-        if user_data["count"] > 2 and user_id not in admin_ids:
-            limite_message = f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
-            bot.send_message(chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
-            bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-            logger.info(f"Límite excedido por {username}, advertencia enviada")
-            return
-
         ticket_number = increment_ticket_counter()
+
+        # Save the request to peticiones_registradas regardless of limit
         destino_message = (
             f"📬 *Nueva solicitud recibida* 🌟\n"
             f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
             f"🎫 *Ticket:* #{ticket_number}\n"
-            f"📊 *Petición:* {user_data['count']}/2\n"
             f"📝 *Mensaje:* {message_text_escaped}\n"
             f"🏠 *Grupo:* {chat_title_escaped}\n"
             f"🕒 *Fecha:* {timestamp_str}\n"
@@ -317,7 +302,7 @@ def handle_message(update, context):
                 "chat_title": chat_title,
                 "thread_id": thread_id
             })
-            logger.info(f"Solicitud #{ticket_number} enviada al grupo destino")
+            logger.info(f"Solicitud #{ticket_number} registrada en la base de datos")
         except telegram.error.BadRequest as e:
             sent_message = bot.send_message(chat_id=GROUP_DESTINO, text=destino_message.replace('*', ''))
             set_peticion_registrada(ticket_number, {
@@ -330,6 +315,51 @@ def handle_message(update, context):
                 "thread_id": thread_id
             })
             logger.error(f"Error al enviar con Markdown: {str(e)}")
+
+        # Now check the limit
+        user_data = get_peticiones_por_usuario(user_id)
+        if not user_data:
+            set_peticiones_por_usuario(user_id, 1, chat_id, username)
+            user_data = {"count": 1, "chat_id": chat_id, "username": username}
+        else:
+            user_data["count"] += 1
+            set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
+
+        if user_data["count"] > 2 and user_id not in admin_ids:
+            limite_message = f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
+            bot.send_message(chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
+            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
+            bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)  # Send warn in main chat
+            logger.info(f"Límite excedido por {username}, advertencia enviada")
+
+            # Move to historial_solicitudes as rejected
+            set_historial_solicitud(ticket_number, {
+                "chat_id": chat_id,
+                "username": username,
+                "message_text": message_text,
+                "chat_title": chat_title,
+                "estado": "limite_excedido",
+                "fecha_gestion": datetime.now(SPAIN_TZ),
+                "admin_username": "Sistema"
+            })
+            del_peticion_registrada(ticket_number)
+            return
+
+        # If limit not exceeded, update the destino message with the count
+        destino_message = (
+            f"📬 *Nueva solicitud recibida* 🌟\n"
+            f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
+            f"🎫 *Ticket:* #{ticket_number}\n"
+            f"📊 *Petición:* {user_data['count']}/2\n"
+            f"📝 *Mensaje:* {message_text_escaped}\n"
+            f"🏠 *Grupo:* {chat_title_escaped}\n"
+            f"🕒 *Fecha:* {timestamp_str}\n"
+            "🌟 *Bot de Entreshijos*"
+        )
+        try:
+            bot.edit_message_text(chat_id=GROUP_DESTINO, message_id=sent_message.message_id, text=destino_message, parse_mode='Markdown')
+        except telegram.error.BadRequest as e:
+            bot.edit_message_text(chat_id=GROUP_DESTINO, message_id=sent_message.message_id, text=destino_message.replace('*', ''))
 
         confirmacion_message = (
             f"✅ *Solicitud registrada* 🎉\n"
@@ -363,7 +393,7 @@ def handle_message(update, context):
             warn_message = f"/warn {username_escaped} Abuso de peticiones mal formuladas"
 
         bot.send_message(chat_id=canal_info["chat_id"], text=notificacion_incorrecta, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, parse_mode='Markdown', message_thread_id=None)  # Send warn in main chat
         logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
 def handle_on(update, context):
@@ -451,7 +481,8 @@ def handle_historial(update, context):
             "subido": "✅ Aceptada",
             "denegado": "❌ Denegada",
             "eliminado": "🗑️ Eliminada",
-            "notificado": "📢 Respondida"
+            "notificado": "📢 Respondida",
+            "limite_excedido": "🚫 Límite excedido"
         }.get(estado, "🔄 Desconocido")
         historial.append(
             f"🎫 *Ticket #{ticket}*\n"
@@ -1043,7 +1074,8 @@ def handle_estado(update, context):
                     "subido": "✅ Aceptada",
                     "denegado": "❌ Denegada",
                     "eliminado": "🗑️ Eliminada",
-                    "notificado": "📢 Respondida"
+                    "notificado": "📢 Respondida",
+                    "limite_excedido": "🚫 Límite excedido"
                 }.get(info["estado"], "🔄 Desconocido")
                 estado_message = (
                     f"📋 *Estado* 🌟\n"
