@@ -42,7 +42,6 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
                       chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
-        # Ajustamos la creación de la tabla procesado para usar "id" y agregar "created_at"
         c.execute('''CREATE TABLE IF NOT EXISTS procesado 
                      (id BIGINT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
@@ -75,11 +74,16 @@ def increment_ticket_counter():
     return get_ticket_counter() + 1
 
 def get_peticiones_por_usuario(user_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT count, chat_id, username FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
-        result = c.fetchone()
-        return dict(result) if result else None
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT count, chat_id, username FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
+            result = c.fetchone()
+            return dict(result) if result else None
+    except psycopg2.errors.UndefinedTable:
+        logger.warning("Tabla peticiones_por_usuario no existe, intentando crearla...")
+        init_db()  # Intentar crear las tablas si no existen
+        return get_peticiones_por_usuario(user_id)  # Reintentar
 
 def set_peticiones_por_usuario(user_id, count, chat_id, username):
     with get_db_connection() as conn:
@@ -145,10 +149,13 @@ def is_procesado(update_id):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as c:
-                # Ajustamos para usar la columna "id" en lugar de "update_id"
                 c.execute("SELECT id FROM procesado WHERE id = %s", (update_id,))
                 result = c.fetchone()
                 return result is not None
+    except psycopg2.errors.UndefinedTable:
+        logger.warning("Tabla procesado no existe, intentando crearla...")
+        init_db()  # Intentar crear las tablas si no existen
+        return False  # Si la tabla no existía, el update_id no está procesado
     except Exception as e:
         logger.error(f"Error al verificar si el update_id está procesado: {str(e)}")
         return False  # En caso de error, asumimos que no está procesado para evitar bloquear el bot
@@ -157,9 +164,12 @@ def set_procesado(update_id):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as c:
-                # Ajustamos para usar la columna "id" y dejamos que "created_at" se llene automáticamente
                 c.execute("INSERT INTO procesado (id) VALUES (%s) ON CONFLICT (id) DO NOTHING", (update_id,))
                 conn.commit()
+    except psycopg2.errors.UndefinedTable:
+        logger.warning("Tabla procesado no existe, intentando crearla...")
+        init_db()  # Intentar crear las tablas si no existen
+        set_procesado(update_id)  # Reintentar
     except Exception as e:
         logger.error(f"Error al registrar el update_id como procesado: {str(e)}")
         # No lanzamos una excepción para evitar que el bot se detenga
@@ -1240,7 +1250,9 @@ def webhook():
 def health_check():
     return "Bot de Entreshijos está activo! 🌟", 200
 
+# Inicializar la base de datos al arrancar el servidor
+init_db()
+
 if __name__ == '__main__':
     logger.info("Iniciando bot en modo local")
-    init_db()  # Inicializar la base de datos al arrancar
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
