@@ -83,7 +83,8 @@ def get_peticiones_por_usuario(user_id):
             result_dict = dict(result)
             now = datetime.now(SPAIN_TZ)
             last_reset = result_dict['last_reset'].astimezone(SPAIN_TZ) if result_dict['last_reset'] else None
-            if not last_reset or (now - last_reset).days >= 1:
+            # Reset daily if 24 hours have passed since last_reset
+            if not last_reset or (now - last_reset).total_seconds() >= 86400:  # 86400 seconds = 1 day
                 result_dict['count'] = 0
                 result_dict['last_reset'] = now
                 set_peticiones_por_usuario(user_id, 0, result_dict['chat_id'], result_dict['username'], now)
@@ -98,9 +99,8 @@ def set_peticiones_por_usuario(user_id, count, chat_id, username, last_reset=Non
         c.execute("""INSERT INTO peticiones_por_usuario (user_id, count, chat_id, username, last_reset) 
                      VALUES (%s, %s, %s, %s, %s)
                      ON CONFLICT (user_id) DO UPDATE SET 
-                     count = %s, chat_id = %s, username = %s, last_reset = %s""",
-                  (user_id, count, chat_id, username, last_reset,
-                   count, chat_id, username, last_reset))
+                     count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
+                  (user_id, count, chat_id, username, last_reset))
         conn.commit()
 
 def get_peticion_registrada(ticket_number):
@@ -118,11 +118,10 @@ def set_peticion_registrada(ticket_number, data):
                      (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id) 
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                      ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = %s, username = %s, message_text = %s, message_id = %s, timestamp = %s, 
-                     chat_title = %s, thread_id = %s""",
+                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
+                     message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
+                     thread_id = EXCLUDED.thread_id""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
-                   data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"],
-                   data["chat_id"], data["username"], data["message_text"],
                    data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"]))
         conn.commit()
 
@@ -147,11 +146,10 @@ def set_historial_solicitud(ticket_number, data):
                      (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username) 
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                      ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = %s, username = %s, message_text = %s, chat_title = %s, estado = %s, 
-                     fecha_gestion = %s, admin_username = %s""",
+                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
+                     chat_title = EXCLUDED.chat_title, estado = EXCLUDED.estado, fecha_gestion = EXCLUDED.fecha_gestion, 
+                     admin_username = EXCLUDED.admin_username""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
-                   data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"],
-                   data["chat_id"], data["username"], data["message_text"],
                    data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"]))
         conn.commit()
 
@@ -166,8 +164,8 @@ def set_grupo_estado(chat_id, title, activo=True):
         c = conn.cursor()
         c.execute("""INSERT INTO grupos_estados (chat_id, title, activo) 
                      VALUES (%s, %s, %s) 
-                     ON CONFLICT (chat_id) DO UPDATE SET title = %s, activo = %s""",
-                  (chat_id, title, activo, title, activo))
+                     ON CONFLICT (chat_id) DO UPDATE SET title = EXCLUDED.title, activo = EXCLUDED.activo""",
+                  (chat_id, title, activo))
         conn.commit()
 
 def get_peticiones_incorrectas(user_id):
@@ -365,7 +363,7 @@ def handle_message(update, context):
             warn_message = f"/warn {username_escaped} Abuso de peticiones mal formuladas"
 
         bot.send_message(chat_id=canal_info["chat_id"], text=notificacion_incorrecta, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
+        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
         logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
 def handle_on(update, context):
