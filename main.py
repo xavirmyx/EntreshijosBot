@@ -406,6 +406,7 @@ def handle_menu(update, context):
     keyboard = [
         [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
         [InlineKeyboardButton("📜 Historial", callback_data="menu_historial")],
+        [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],  # Añadido aquí
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
@@ -509,6 +510,30 @@ def handle_estado(update, context):
         bot.send_message(chat_id=canal_info["chat_id"], text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown', 
                          message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
+def handle_graficas(update, context):
+    if not update.message:
+        return
+    message = update.message
+    chat_id = message.chat_id
+    if str(chat_id) != GROUP_DESTINO:
+        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
+        return
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+        stats = dict(c.fetchall())
+
+    total = sum(stats.values())
+    stats_msg = (
+        f"📊 *Estadísticas de Solicitudes* 🌟\n"
+        f"Total gestionadas: {total}\n"
+        f"✅ Subidas: {stats.get('subido', 0)}\n"
+        f"❌ Denegadas: {stats.get('denegado', 0)}\n"
+        f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
+        f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
+    )
+    bot.send_message(chat_id=chat_id, text=stats_msg, parse_mode='Markdown')
+
 # Manejador de botones
 def button_handler(update, context):
     query = update.callback_query
@@ -524,6 +549,7 @@ def button_handler(update, context):
         keyboard = [
             [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
             [InlineKeyboardButton("📜 Historial", callback_data="menu_historial")],
+            [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],
             [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
             [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
             [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
@@ -593,10 +619,31 @@ def button_handler(update, context):
                 f"👥 Admin: {admin_username}\n"
                 f"📌 Estado: {estado_str}\n"
             )
-        historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial[:5])  # Limitar a 5 por simplicidad
+        historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial[:5])
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         bot.send_message(chat_id=chat_id, text=historial_message, reply_markup=reply_markup, parse_mode='Markdown')
+        query.message.delete()
+        return
+
+    if data == "menu_graficas":
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+            stats = dict(c.fetchall())
+
+        total = sum(stats.values())
+        stats_msg = (
+            f"📊 *Estadísticas de Solicitudes* 🌟\n"
+            f"Total gestionadas: {total}\n"
+            f"✅ Subidas: {stats.get('subido', 0)}\n"
+            f"❌ Denegadas: {stats.get('denegado', 0)}\n"
+            f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
+            f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot.send_message(chat_id=chat_id, text=stats_msg, reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
         return
 
@@ -792,18 +839,23 @@ def button_handler(update, context):
 
         accion = data.split("_")[2]
         if accion in ["subido", "denegado", "eliminar"]:
+            accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             keyboard = [
                 [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
                 [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            accion_str = {"subido": "subido", "denegado": "denegado", "eliminar": "eliminado"}[accion]
-            query.edit_message_text(text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}?", 
-                                    reply_markup=reply_markup, parse_mode='Markdown')
+            # Añadimos un emoji único para evitar "Message is not modified"
+            query.edit_message_text(
+                text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}? 🔍",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
             return
 
         if data.endswith("_confirm"):
             accion = data.split("_")[2]
+            accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             set_historial_solicitud(ticket, {
                 "chat_id": info["chat_id"],
                 "username": info["username"],
@@ -819,8 +871,11 @@ def button_handler(update, context):
                 [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como {accion}.* 🌟\n¿Notificar al usuario?", 
-                                    reply_markup=reply_markup, parse_mode='Markdown')
+            query.edit_message_text(
+                text=f"✅ *Ticket #{ticket} procesado como {accion_str}.* 🌟\n¿Notificar al usuario?",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
             return
 
         if data.endswith("_notify_yes") or data.endswith("_notify_no"):
@@ -828,15 +883,19 @@ def button_handler(update, context):
             notify = data.endswith("_notify_yes")
             username_escaped = escape_markdown(info["username"], True)
             message_text_escaped = escape_markdown(info["message_text"])
+            accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             if accion == "subido" and notify:
-                bot.send_message(chat_id=info["chat_id"], text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
-                                 parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                bot.send_message(chat_id=info["chat_id"], 
+                               text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
+                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
             elif accion == "denegado" and notify:
-                bot.send_message(chat_id=info["chat_id"], text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
-                                 parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                bot.send_message(chat_id=info["chat_id"], 
+                               text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
+                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
             elif accion == "eliminar" and notify:
-                bot.send_message(chat_id=info["chat_id"], text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
-                                 parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                bot.send_message(chat_id=info["chat_id"], 
+                               text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
+                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
                 try:
                     bot.delete_message(chat_id=GROUP_DESTINO, message_id=info["message_id"])
                 except telegram.error.TelegramError as e:
@@ -844,8 +903,11 @@ def button_handler(update, context):
             del_peticion_registrada(ticket)
             keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            query.edit_message_text(text=f"✅ *Ticket #{ticket} procesado como {accion}{' y notificado' if notify else ''}.* 🌟", 
-                                    reply_markup=reply_markup, parse_mode='Markdown')
+            query.edit_message_text(
+                text=f"✅ *Ticket #{ticket} procesado como {accion_str}{' y notificado' if notify else ''}.* 🌟",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
             return
 
         if data.endswith("_cancel"):
@@ -860,6 +922,7 @@ dispatcher.add_handler(CommandHandler('restar', handle_restar))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
+dispatcher.add_handler(CommandHandler('graficas', handle_graficas))  # Añadido aquí
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
 # Rutas Flask
