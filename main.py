@@ -16,7 +16,7 @@ GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL no está configurada en las variables de entorno. Por favor, configúrala en Render.")
+    raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
 
 # Configura el logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 bot = telegram.Bot(token=TOKEN)
 app = Flask(__name__)
 
-# Configura el Dispatcher con al menos 1 worker
+# Configura el Dispatcher
 dispatcher = Dispatcher(bot, None, workers=1)
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
@@ -414,141 +414,6 @@ def handle_menu(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     bot.send_message(chat_id=chat_id, text="📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
 
-def handle_on(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
-        return
-    grupos_estados = get_grupos_estados()
-    if not grupos_estados:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
-        return
-    keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                    callback_data=f"select_on_{gid}")] for gid, info in grupos_estados.items()]
-    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on"),
-                     InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
-    sent_message = bot.send_message(chat_id=chat_id, text="🟢 *Activar solicitudes* 🌟\nSelecciona los grupos:", reply_markup=reply_markup, parse_mode='Markdown')
-    grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
-
-def handle_off(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
-        return
-    grupos_estados = get_grupos_estados()
-    if not grupos_estados:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
-        return
-    keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                    callback_data=f"select_off_{gid}")] for gid, info in grupos_estados.items()]
-    keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off"),
-                     InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
-    sent_message = bot.send_message(chat_id=chat_id, text="🔴 *Desactivar solicitudes* 🌟\nSelecciona los grupos:", reply_markup=reply_markup, parse_mode='Markdown')
-    grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
-
-def handle_grupos(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
-        return
-    grupos_estados = get_grupos_estados()
-    if not grupos_estados:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
-        return
-    estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
-                       for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
-    keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id, text=f"📋 *Estado de los grupos* 🌟\n{estado}", reply_markup=reply_markup, parse_mode='Markdown')
-
-def handle_historial(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
-        return
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT ticket_number, username, message_text, chat_title, estado, fecha_gestion, admin_username "
-                  "FROM historial_solicitudes ORDER BY ticket_number DESC")
-        solicitudes = c.fetchall()
-    if not solicitudes:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟", parse_mode='Markdown')
-        return
-    historial = []
-    for row in solicitudes:
-        ticket, username, message_text, chat_title, estado, fecha_gestion, admin_username = row
-        estado_str = {
-            "subido": "✅ Aceptada",
-            "denegado": "❌ Denegada",
-            "eliminado": "🗑️ Eliminada",
-            "notificado": "📢 Respondida",
-            "limite_excedido": "🚫 Límite excedido"
-        }.get(estado, "🔄 Desconocido")
-        historial.append(
-            f"🎫 *Ticket #{ticket}*\n"
-            f"👤 Usuario: {escape_markdown(username, True)}\n"
-            f"📝 Mensaje: {escape_markdown(message_text)}\n"
-            f"🏠 Grupo: {escape_markdown(chat_title)}\n"
-            f"📅 Gestionada: {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n"
-            f"👥 Admin: {admin_username}\n"
-            f"📌 Estado: {estado_str}\n"
-        )
-    historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial)
-    keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id, text=historial_message, reply_markup=reply_markup, parse_mode='Markdown')
-
-def handle_pendientes(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO:
-        bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
-        return
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-        pendientes = c.fetchall()
-    if not pendientes:
-        bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
-        return
-    ITEMS_PER_PAGE = 5
-    page = 1
-    start_idx = (page - 1) * ITEMS_PER_PAGE
-    end_idx = start_idx + ITEMS_PER_PAGE
-    page_items = pendientes[start_idx:end_idx]
-    total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-
-    keyboard = [[InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
-                                    callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
-    nav_buttons = []
-    if page > 1:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
-    if page < total_pages:
-        nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-    nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-    keyboard.append(nav_buttons)
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id, text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
-                     reply_markup=reply_markup, parse_mode='Markdown')
-
 def handle_sumar(update, context):
     if not update.message:
         return
@@ -669,33 +534,132 @@ def button_handler(update, context):
         return
 
     if data == "menu_pendientes":
-        handle_pendientes(update, context)
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+            pendientes = c.fetchall()
+        if not pendientes:
+            bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
+            query.message.delete()
+            return
+        ITEMS_PER_PAGE = 5
+        page = 1
+        start_idx = (page - 1) * ITEMS_PER_PAGE
+        end_idx = start_idx + ITEMS_PER_PAGE
+        page_items = pendientes[start_idx:end_idx]
+        total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+        keyboard = [[InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
+                                        callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
+        nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+        keyboard.append(nav_buttons)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot.send_message(chat_id=chat_id, text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
+                         reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
         return
+
     if data == "menu_historial":
-        handle_historial(update, context)
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT ticket_number, username, message_text, chat_title, estado, fecha_gestion, admin_username "
+                      "FROM historial_solicitudes ORDER BY ticket_number DESC")
+            solicitudes = c.fetchall()
+        if not solicitudes:
+            bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟", parse_mode='Markdown')
+            query.message.delete()
+            return
+        historial = []
+        for row in solicitudes:
+            ticket, username, message_text, chat_title, estado, fecha_gestion, admin_username = row
+            estado_str = {
+                "subido": "✅ Aceptada",
+                "denegado": "❌ Denegada",
+                "eliminado": "🗑️ Eliminada",
+                "notificado": "📢 Respondida",
+                "limite_excedido": "🚫 Límite excedido"
+            }.get(estado, "🔄 Desconocido")
+            historial.append(
+                f"🎫 *Ticket #{ticket}*\n"
+                f"👤 Usuario: {escape_markdown(username, True)}\n"
+                f"📝 Mensaje: {escape_markdown(message_text)}\n"
+                f"🏠 Grupo: {escape_markdown(chat_title)}\n"
+                f"📅 Gestionada: {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"👥 Admin: {admin_username}\n"
+                f"📌 Estado: {estado_str}\n"
+            )
+        historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial[:5])  # Limitar a 5 por simplicidad
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot.send_message(chat_id=chat_id, text=historial_message, reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
         return
+
     if data == "menu_grupos":
-        handle_grupos(update, context)
+        grupos_estados = get_grupos_estados()
+        if not grupos_estados:
+            bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
+            query.message.delete()
+            return
+        estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
+                           for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        bot.send_message(chat_id=chat_id, text=f"📋 *Estado de los grupos* 🌟\n{estado}", reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
         return
+
     if data == "menu_on":
-        handle_on(update, context)
+        grupos_estados = get_grupos_estados()
+        if not grupos_estados:
+            bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
+            query.message.delete()
+            return
+        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
+                                        callback_data=f"select_on_{gid}")] for gid, info in grupos_estados.items()]
+        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on"),
+                         InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
+        sent_message = bot.send_message(chat_id=chat_id, text="🟢 *Activar solicitudes* 🌟\nSelecciona los grupos:", 
+                                       reply_markup=reply_markup, parse_mode='Markdown')
+        grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
         query.message.delete()
         return
+
     if data == "menu_off":
-        handle_off(update, context)
+        grupos_estados = get_grupos_estados()
+        if not grupos_estados:
+            bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
+            query.message.delete()
+            return
+        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
+                                        callback_data=f"select_off_{gid}")] for gid, info in grupos_estados.items()]
+        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off"),
+                         InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
+        sent_message = bot.send_message(chat_id=chat_id, text="🔴 *Desactivar solicitudes* 🌟\nSelecciona los grupos:", 
+                                       reply_markup=reply_markup, parse_mode='Markdown')
+        grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
         query.message.delete()
         return
+
     if data == "menu_sumar":
         bot.send_message(chat_id=chat_id, text="➕ *Sumar peticiones* 🌟\nPor favor, escribe: /sumar @username [número]", parse_mode='Markdown')
         query.message.delete()
         return
+
     if data == "menu_restar":
         bot.send_message(chat_id=chat_id, text="➖ *Restar peticiones* 🌟\nPor favor, escribe: /restar @username [número]", parse_mode='Markdown')
         query.message.delete()
         return
+
     if data == "menu_ping":
         bot.send_message(chat_id=chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
         query.message.delete()
@@ -891,11 +855,6 @@ def button_handler(update, context):
 # Añadir handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
-dispatcher.add_handler(CommandHandler('on', handle_on))
-dispatcher.add_handler(CommandHandler('off', handle_off))
-dispatcher.add_handler(CommandHandler('grupos', handle_grupos))
-dispatcher.add_handler(CommandHandler('historial', handle_historial))
-dispatcher.add_handler(CommandHandler('pendientes', handle_pendientes))
 dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
 dispatcher.add_handler(CommandHandler('restar', handle_restar))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
