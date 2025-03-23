@@ -581,17 +581,16 @@ def button_handler(update, context):
             keyboard = []
             for ticket, username, chat_title in page_items:
                 try:
-                    # Escapar completamente el username para evitar problemas con caracteres especiales
                     username_safe = escape_markdown(username, preserve_username=True)
                     chat_title_safe = escape_markdown(chat_title)
                     button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
                 except Exception as e:
                     logger.error(f"Error al procesar ticket #{ticket} con username {username}: {str(e)}")
-                    # Fallback: usar texto sin Markdown
                     button_text = f"#{ticket} - {username} ({chat_title})"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
 
+            # Construir los botones de navegación
             nav_buttons = []
             if page > 1:
                 nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
