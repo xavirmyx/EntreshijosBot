@@ -42,7 +42,8 @@ def init_db():
                      (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT, last_reset TIMESTAMP WITH TIME ZONE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT)''')
+                      message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT, 
+                      is_deleted BOOLEAN DEFAULT FALSE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
                       chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT)''')
@@ -109,7 +110,7 @@ def get_peticion_registrada(ticket_number):
     with get_db_connection() as conn:
         c = conn.cursor()
         c.execute("SELECT chat_id, username, message_text, message_id, timestamp, chat_title, thread_id "
-                  "FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
+                  "FROM peticiones_registradas WHERE ticket_number = %s AND is_deleted = FALSE", (ticket_number,))
         result = c.fetchone()
         return dict(result) if result else None
 
@@ -117,12 +118,12 @@ def set_peticion_registrada(ticket_number, data):
     with get_db_connection() as conn:
         c = conn.cursor()
         c.execute("""INSERT INTO peticiones_registradas 
-                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id, is_deleted) 
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE)
                      ON CONFLICT (ticket_number) DO UPDATE SET 
                      chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
                      message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
-                     thread_id = EXCLUDED.thread_id""",
+                     thread_id = EXCLUDED.thread_id, is_deleted = FALSE""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
                    data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"]))
         conn.commit()
@@ -130,7 +131,7 @@ def set_peticion_registrada(ticket_number, data):
 def del_peticion_registrada(ticket_number):
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
+        c.execute("UPDATE peticiones_registradas SET is_deleted = TRUE WHERE ticket_number = %s", (ticket_number,))
         conn.commit()
 
 def get_historial_solicitud(ticket_number):
@@ -564,7 +565,7 @@ def button_handler(update, context):
         try:
             with get_db_connection() as conn:
                 c = conn.cursor()
-                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas WHERE is_deleted = FALSE ORDER BY ticket_number")
                 pendientes = c.fetchall()
             if not pendientes:
                 bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
@@ -594,12 +595,12 @@ def button_handler(update, context):
 
             nav_buttons = []
             if page > 1:
-                nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-                keyboard.append(nav_buttons)
-                reply_markup = InlineKeyboardMarkup(keyboard)
                 nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+            keyboard.append(nav_buttons)
+            reply_markup = InlineKeyboardMarkup(keyboard)
 
             message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
             try:
@@ -817,7 +818,7 @@ def button_handler(update, context):
             page = int(data.split("_")[2])
             with get_db_connection() as conn:
                 c = conn.cursor()
-                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas WHERE is_deleted = FALSE ORDER BY ticket_number")
                 pendientes = c.fetchall()
             ITEMS_PER_PAGE = 5
             total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
