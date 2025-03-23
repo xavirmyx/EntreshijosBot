@@ -562,18 +562,36 @@ def button_handler(update, context):
         page_items = pendientes[start_idx:end_idx]
         total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
 
-        keyboard = [[InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
-                                        callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
+        keyboard = []
+        for ticket, username, chat_title in page_items:
+            try:
+                # Escapar caracteres especiales en username y chat_title
+                username_safe = escape_markdown(username, preserve_username=True)
+                chat_title_safe = escape_markdown(chat_title)
+                button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
+            except Exception as e:
+                logger.error(f"Error al procesar ticket #{ticket}: {str(e)}")
+                # Usar texto sin formato como fallback
+                button_text = f"#{ticket} - {username} ({chat_title})"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
+
         nav_buttons = []
+        nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+        keyboard.append(nav_buttons)
+        reply_markup = InlineKeyboardMarkup(keyboard)
         if page > 1:
             nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
         if page < total_pages:
             nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-        nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-        keyboard.append(nav_buttons)
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        bot.send_message(chat_id=chat_id, text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
-                         reply_markup=reply_markup, parse_mode='Markdown')
+
+        message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
+        try:
+            bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode='Markdown')
+        except telegram.error.BadRequest as e:
+            logger.error(f"Error al enviar mensaje con Markdown: {str(e)}")
+            # Enviar sin Markdown como fallback
+            bot.send_message(chat_id=chat_id, text=message_text.replace('*', ''), reply_markup=reply_markup)
         query.message.delete()
         return
 
@@ -789,12 +807,12 @@ def button_handler(update, context):
                                             callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
             nav_buttons = []
             if page > 1:
+                nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+                keyboard.append(nav_buttons)
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-            keyboard.append(nav_buttons)
-            reply_markup = InlineKeyboardMarkup(keyboard)
             query.edit_message_text(text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
                                     reply_markup=reply_markup, parse_mode='Markdown')
             return
