@@ -214,10 +214,10 @@ def escape_markdown(text, preserve_username=False):
         return text
     if preserve_username and text.startswith('@'):
         return text
+    # Escape all Markdown special characters
     characters_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in characters_to_escape:
         text = text.replace(char, f'\\{char}')
-    text = text.encode('ascii', 'ignore').decode('ascii')
     return text
 
 def remove_emojis(text):
@@ -231,9 +231,17 @@ def remove_emojis(text):
 
 def update_grupos_estados(chat_id, title=None):
     grupos = get_grupos_estados()
-    if not title:
-        title = f"Grupo {chat_id}"
-    # Clean the title before storing
+
+    # If no title is provided, fetch the latest title from Telegram
+    if title is None:
+        try:
+            chat = bot.get_chat(chat_id)
+            title = chat.title or f"Grupo {chat_id}"
+        except telegram.error.TelegramError as e:
+            logger.error(f"❌ Error al obtener el título del chat {chat_id}: {str(e)}")
+            title = f"Grupo {chat_id}"
+
+    # Clean the title for storage (remove emojis to avoid database issues)
     clean_title = remove_emojis(title)
     clean_title = escape_markdown(clean_title)
 
@@ -241,7 +249,7 @@ def update_grupos_estados(chat_id, title=None):
         set_grupo_estado(chat_id, clean_title)
         logger.info(f"✅ Nuevo grupo registrado: {chat_id} - {clean_title}")
     else:
-        # Always update the title if a new one is provided
+        # Always update the title in the database
         current_title = grupos[chat_id]["title"]
         if current_title != clean_title:
             set_grupo_estado(chat_id, clean_title, grupos[chat_id]["activo"])
@@ -266,6 +274,7 @@ def handle_message(update, context):
     thread_id = message.message_thread_id
     canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
 
+    # Update the group title in the database with the latest title
     update_grupos_estados(chat_id, chat_title)
 
     timestamp = datetime.now(SPAIN_TZ)
@@ -312,7 +321,7 @@ def handle_message(update, context):
                 "message_text": message_text,
                 "message_id": sent_message.message_id,
                 "timestamp": timestamp,
-                "chat_title": chat_title,
+                "chat_title": chat_title,  # Store the raw title with emojis
                 "thread_id": thread_id
             })
             logger.info(f"✅ Solicitud #{ticket_number} registrada en la base de datos")
@@ -461,7 +470,7 @@ def handle_grupos(update, context):
     if not grupos_estados:
         bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
         return
-    estado = "\n".join([f"🏠 {escape_markdown(info['title'])}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
+    estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
                        for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
     keyboard = [[InlineKeyboardButton("🔙 Volver", callback_data="grupos_retroceder")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -502,7 +511,7 @@ def handle_historial(update, context):
             f"🎫 *Ticket #{ticket}*\n"
             f"👤 Usuario: {escape_markdown(username, True)}\n"
             f"📝 Mensaje: {escape_markdown(message_text)}\n"
-            f"🏠 Grupo: {escape_markdown(chat_title)}\n"
+            f"🏠 Grupo: {chat_title}\n"  # Use raw chat_title with emojis
             f"📅 Gestionada: {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n"
             f"👥 Admin: {escape_markdown(admin_username)}\n"
             f"📌 Estado: {estado_str}\n"
@@ -544,7 +553,7 @@ def handle_go(update, context):
         return
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT ticket_number, chat_title, username FROM peticiones_registradas ORDER BY ticket_number")
+        c.execute("SELECT ticket_number, chat_id, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
         pendientes = c.fetchall()
     if not pendientes:
         context.bot.send_message(
@@ -553,13 +562,26 @@ def handle_go(update, context):
             parse_mode='Markdown'
         )
         return
+
     keyboard = []
-    for ticket, chat_title, username in pendientes:
-        clean_chat_title = remove_emojis(chat_title)
-        escaped_chat_title = escape_markdown(clean_chat_title)
+    for ticket, chat_id, username, stored_chat_title in pendientes:
+        # Fetch the latest chat title from Telegram
+        try:
+            chat = bot.get_chat(chat_id)
+            chat_title = chat.title or f"Grupo {chat_id}"
+        except telegram.error.TelegramError as e:
+            logger.error(f"❌ Error al obtener el título del chat {chat_id}: {str(e)}")
+            # Fallback to the stored title if we can't fetch from Telegram
+            chat_title = stored_chat_title or f"Grupo {chat_id}"
+
+        # Update the title in the database (cleaned version)
+        update_grupos_estados(chat_id, chat_title)
+
+        # Use the raw chat_title with emojis for display
         escaped_username = escape_markdown(username, preserve_username=True)
-        button_text = f"#{ticket} - {escaped_chat_title} - {escaped_username}"
+        button_text = f"#{ticket} - {chat_title} - {escaped_username}"
         keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
     context.bot.send_message(
         chat_id=chat_id,
@@ -747,9 +769,12 @@ def handle_graficas(update, context):
             user_max_name = user_max['username'] if user_max else "N/A"
             user_max_count = user_max['count'] if user_max else 0
 
-        # Properly escape usernames to avoid Markdown parsing issues
-        escaped_admin_max_name = escape_markdown(admin_max_name, preserve_username=True)
-        escaped_user_max_name = escape_markdown(user_max_name, preserve_username=True)
+        # Log usernames to debug Markdown issues
+        logger.info(f"📊 /graficas - admin_max_name: {admin_max_name}, user_max_name: {user_max_name}")
+
+        # Enhanced escaping for usernames
+        escaped_admin_max_name = admin_max_name if admin_max_name == "N/A" else escape_markdown(admin_max_name, preserve_username=True)
+        escaped_user_max_name = user_max_name if user_max_name == "N/A" else escape_markdown(user_max_name, preserve_username=True)
 
         graficas_message = (
             f"📊 *Estadísticas del Bot* 🌟\n"
@@ -765,7 +790,7 @@ def handle_graficas(update, context):
         try:
             bot.send_message(chat_id=chat_id, text=graficas_message, parse_mode='Markdown')
         except telegram.error.BadRequest as e:
-            logger.error(f"❌ Error al enviar mensaje con Markdown en /graficas: {str(e)}")
+            logger.error(f"❌ Error al enviar mensaje con Markdown en /graficas: {str(e)} - Message: {graficas_message}")
             # Fallback to sending without Markdown
             bot.send_message(chat_id=chat_id, text=graficas_message.replace('*', ''))
     except Exception as e:
@@ -807,7 +832,7 @@ def button_handler(update, context):
 
             if mensaje_id == grupos_seleccionados[chat_id]["mensaje_id"]:
                 grupos_estados = get_grupos_estados()
-                title = escape_markdown(grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}"))
+                title = grupos_estados.get(grupo_id, {}).get("title", f"Grupo {grupo_id}")
                 current_text = query.message.text
                 if grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                     grupos_seleccionados[chat_id]["grupos"].remove(grupo_id)
@@ -821,7 +846,7 @@ def button_handler(update, context):
                     for gid, info in grupos_estados.items():
                         seleccionado = gid in grupos_seleccionados[chat_id]["grupos"]
                         callback = f"select_{accion}_{gid}"
-                        keyboard.append([InlineKeyboardButton(f"{escape_markdown(info['title'])} {'🟢' if info['activo'] else '🔴'}{' ✅' if seleccionado else ''}",
+                        keyboard.append([InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}{' ✅' if seleccionado else ''}",
                                                              callback_data=callback)])
                     keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}")])
                     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -840,7 +865,7 @@ def button_handler(update, context):
 
             grupos_seleccionados[chat_id]["estado"] = "confirmacion"
             grupos_estados = get_grupos_estados()
-            grupos = "\n".join([escape_markdown(grupos_estados[gid]["title"]) for gid in grupos_seleccionados[chat_id]["grupos"]])
+            grupos = "\n".join([grupos_estados[gid]["title"] for gid in grupos_seleccionados[chat_id]["grupos"]])
             texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'}* 🌟\n" \
                     f"Grupos afectados:\n{grupos}\n\n¿Enviar notificación a los grupos seleccionados?"
             keyboard = [
@@ -897,7 +922,7 @@ def button_handler(update, context):
             for gid, info in grupos_estados.items():
                 seleccionado = gid in grupos_seleccionados[chat_id]["grupos"]
                 callback = f"select_{accion}_{gid}"
-                keyboard.append([InlineKeyboardButton(f"{escape_markdown(info['title'])} {'🟢' if info['activo'] else '🔴'}{' ✅' if seleccionado else ''}",
+                keyboard.append([InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}{' ✅' if seleccionado else ''}",
                                                      callback_data=callback)])
             keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}")])
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -914,7 +939,7 @@ def button_handler(update, context):
                 c = conn.cursor()
                 c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
                 pendientes = c.fetchall()
-            keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username, True)} ({escape_markdown(chat_title)})",
+            keyboard = [[InlineKeyboardButton(f"#{ticket} - {escape_markdown(username, True)} ({chat_title})",
                                              callback_data=f"pend_{ticket}")] for ticket, username, chat_title in pendientes]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = "📋 *Solicitudes pendientes* 🌟\nSelecciona una solicitud para gestionar:"
@@ -947,7 +972,7 @@ def button_handler(update, context):
                 f"📋 *Solicitud #{ticket}* 🌟\n"
                 f"👤 Usuario: {escape_markdown(info['username'], True)}\n"
                 f"📝 Mensaje: {escape_markdown(info['message_text'])}\n"
-                f"🏠 Grupo: {escape_markdown(info['chat_title'])}\n"
+                f"🏠 Grupo: {info['chat_title']}\n"  # Use raw chat_title with emojis
                 f"🕒 Fecha: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}\n"
                 "Selecciona una acción:"
             )
@@ -1216,57 +1241,58 @@ def handle_ayuda(update, context):
         bot.send_message(chat_id=canal_info["chat_id"], text=ayuda_message.replace('*', ''), message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
 def handle_estado(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
-    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
-    username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
-    args = context.args
-    if not args:
-        bot.send_message(chat_id=canal_info["chat_id"], text="❗ Uso correcto: /estado [ticket] 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-        return
-    try:
-        ticket = int(args[0])
-        info = get_peticion_registrada(ticket)
-        if info:
-            estado_message = (
-                f"📋 *Estado de la solicitud* 🌟\n"
-                f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
-                f"Estado: Pendiente ⏳\n"
-                f"🕒 Enviada: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}"
-            )
-        else:
-            info = get_historial_solicitud(ticket)
-            if info:
-                estado_str = {
-                    "subido": "✅ Aceptada",
-                    "denegado": "❌ Denegada",
-                    "eliminado": "🗑️ Eliminada",
-                    "notificado": "📢 Respondida",
-                    "limite_excedido": "🚫 Límite excedido"
-                }.get(info["estado"], "🔄 Desconocido")
-                estado_message = (
-                    f"📋 *Estado de la solicitud* 🌟\n"
-                    f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
-                    f"Estado: {estado_str}\n"
-                    f"🕒 Gestionada: {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-                    f"👥 Admin: {escape_markdown(info['admin_username'])}"
-                )
-            else:
-                estado_message = f"❌ Ticket #{ticket} no encontrado. 🌟"
-        try:
-            bot.send_message(chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-        except telegram.error.BadRequest:
-            bot.send_message(chat_id=canal_info["chat_id"], text=estado_message.replace('*', ''), message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-    except ValueError:
-        bot.send_message(chat_id=canal_info["chat_id"], text="❗ El ticket debe ser un número válido. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
+                    if not update.message:
+                        return
+                    message = update.message
+                    chat_id = message.chat_id
+                    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
+                    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
+                    username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
+                    args = context.args
+                    if not args:
+                        bot.send_message(chat_id=canal_info["chat_id"], text="❗ Uso correcto: /estado [ticket] 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
+                        return
+                    try:
+                        ticket = int(args[0])
+                        info = get_peticion_registrada(ticket)
+                        if info:
+                            estado_message = (
+                                f"📋 *Estado de la solicitud* 🌟\n"
+                                f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
+                                f"Estado: Pendiente ⏳\n"
+                                f"🕒 Enviada: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}"
+                            )
+                        else:
+                            info = get_historial_solicitud(ticket)
+                            if info:
+                                estado_str = {
+                                    "subido": "✅ Aceptada",
+                                    "denegado": "❌ Denegada",
+                                    "eliminado": "🗑️ Eliminada",
+                                    "notificado": "📢 Respondida",
+                                    "limite_excedido": "🚫 Límite excedido"
+                                }.get(info["estado"], "🔄 Desconocido")
+                                estado_message = (
+                                    f"📋 *Estado de la solicitud* 🌟\n"
+                                    f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
+                                    f"Estado: {estado_str}\n"
+                                    f"🕒 Gestionada: {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
+                                    f"👥 Admin: {escape_markdown(info['admin_username'], preserve_username=True)}"
+                                )
+                            else:
+                                estado_message = f"❌ Ticket #{ticket} no encontrado. 🌟"
+                        try:
+                            bot.send_message(chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
+                        except telegram.error.BadRequest as e:
+                            logger.error(f"❌ Error al enviar mensaje con Markdown en /estado: {str(e)} - Message: {estado_message}")
+                            bot.send_message(chat_id=canal_info["chat_id"], text=estado_message.replace('*', ''), message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
+                    except ValueError:
+                        bot.send_message(chat_id=canal_info["chat_id"], text="❗ El ticket debe ser un número válido. 🌟", parse_mode='Markdown', message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
-# Diccionario global para manejar selección de grupos
+                # Diccionario global para manejar selección de grupos
 grupos_seleccionados = {}
 
-# Registro de handlers
+                # Registro de handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 dispatcher.add_handler(CommandHandler("on", handle_on))
 dispatcher.add_handler(CommandHandler("off", handle_off))
@@ -1285,29 +1311,29 @@ dispatcher.add_handler(CommandHandler("menu", handle_menu))
 dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
 dispatcher.add_handler(CommandHandler("estado", handle_estado))
 
-# Configuración del webhook
+                # Configuración del webhook
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        update = telegram.Update.de_json(request.get_json(force=True), bot)
-        dispatcher.process_update(update)
-        return 'OK', 200
-    except Exception as e:
-        logger.error(f"❌ Error en el webhook: {str(e)}")
-        return 'Error', 500
+                    try:
+                        update = telegram.Update.de_json(request.get_json(force=True), bot)
+                        dispatcher.process_update(update)
+                        return 'OK', 200
+                    except Exception as e:
+                        logger.error(f"❌ Error en el webhook: {str(e)}")
+                        return 'Error', 500
 
 @app.route('/')
 def home():
-    return 'Bot de Entreshijos está funcionando. 🌟'
+                    return 'Bot de Entreshijos está funcionando. 🌟'
 
 if __name__ == '__main__':
-    try:
-        init_db()
-        for chat_id, title in GRUPOS_PREDEFINIDOS.items():
-            update_grupos_estados(chat_id, title)
-        bot.set_webhook(WEBHOOK_URL)
-        logger.info(f"✅ Webhook configurado en: {WEBHOOK_URL}")
-        app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
-    except Exception as e:
-        logger.error(f"❌ Error al iniciar el bot: {str(e)}")
-        raise
+                    try:
+                        init_db()
+                        for chat_id, title in GRUPOS_PREDEFINIDOS.items():
+                            update_grupos_estados(chat_id, title)
+                        bot.set_webhook(WEBHOOK_URL)
+                        logger.info(f"✅ Webhook configurado en: {WEBHOOK_URL}")
+                        app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8443)))
+                    except Exception as e:
+                        logger.error(f"❌ Error al iniciar el bot: {str(e)}")
+                        raise
