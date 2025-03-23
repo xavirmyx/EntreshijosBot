@@ -33,23 +33,23 @@ SPAIN_TZ = pytz.timezone('Europe/Madrid')
 # Variables globales
 grupos_seleccionados = {}
 
-# Inicialización de la base de datos PostgreSQL
+# Inicialización de la base de datos PostgreSQL (Supabase)
 def init_db():
     try:
         conn = get_db_connection()
         c = conn.cursor()
+        # Tablas ya creadas en Supabase, solo verificamos existencia
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
-                     (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT, last_reset TIMESTAMP WITH TIME ZONE)''')
+                     (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT, last_reset TIMESTAMPTZ)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT)''')
+                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT)''')
+                      chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP, admin_username TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS grupos_estados 
                      (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
-                     (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)''')
+                     (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP, chat_id BIGINT)''')
         conn.commit()
         conn.close()
         logger.info("Base de datos inicializada correctamente.")
@@ -108,8 +108,7 @@ def set_peticiones_por_usuario(user_id, count, chat_id, username, last_reset=Non
 def get_peticion_registrada(ticket_number):
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT chat_id, username, message_text, message_id, timestamp, chat_title, thread_id "
-                  "FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
+        c.execute("SELECT chat_id, username, message_text FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
         result = c.fetchone()
         return dict(result) if result else None
 
@@ -117,14 +116,11 @@ def set_peticion_registrada(ticket_number, data):
     with get_db_connection() as conn:
         c = conn.cursor()
         c.execute("""INSERT INTO peticiones_registradas 
-                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     (ticket_number, chat_id, username, message_text) 
+                     VALUES (%s, %s, %s, %s)
                      ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
-                     message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
-                     thread_id = EXCLUDED.thread_id""",
-                  (ticket_number, data["chat_id"], data["username"], data["message_text"],
-                   data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"]))
+                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text""",
+                  (ticket_number, data["chat_id"], data["username"], data["message_text"]))
         conn.commit()
 
 def del_peticion_registrada(ticket_number):
@@ -298,10 +294,6 @@ def handle_message(update, context):
                 "chat_id": chat_id,
                 "username": username,
                 "message_text": message_text,
-                "message_id": sent_message.message_id,
-                "timestamp": timestamp,
-                "chat_title": chat_title,
-                "thread_id": thread_id
             })
             logger.info(f"Solicitud #{ticket_number} registrada en la base de datos")
         except telegram.error.BadRequest as e:
@@ -310,10 +302,6 @@ def handle_message(update, context):
                 "chat_id": chat_id,
                 "username": username,
                 "message_text": message_text,
-                "message_id": sent_message.message_id,
-                "timestamp": timestamp,
-                "chat_title": chat_title,
-                "thread_id": thread_id
             })
             logger.error(f"Error al enviar con Markdown: {str(e)}")
 
@@ -482,8 +470,7 @@ def handle_estado(update, context):
             estado_message = (
                 f"📋 *Estado* 🌟\n"
                 f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
-                f"Estado: Pendiente ⏳\n"
-                f"🕒 Enviada: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}"
+                f"Estado: Pendiente ⏳"
             )
         else:
             info = get_historial_solicitud(ticket)
@@ -562,8 +549,8 @@ def button_handler(update, context):
     if data == "menu_pendientes":
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-            pendientes = c.fetchall()
+            c.execute("SELECT ticket_number, username, chat_id FROM peticiones_registradas ORDER BY ticket_number")
+            pendientes = [(row[0], row[1], GRUPOS_PREDEFINIDOS.get(row[2], f"Grupo {row[2]}")) for row in c.fetchall()]
         if not pendientes:
             bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
             query.message.delete()
@@ -788,8 +775,8 @@ def button_handler(update, context):
             page = int(data.split("_")[2])
             with get_db_connection() as conn:
                 c = conn.cursor()
-                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-                pendientes = c.fetchall()
+                c.execute("SELECT ticket_number, username, chat_id FROM peticiones_registradas ORDER BY ticket_number")
+                pendientes = [(row[0], row[1], GRUPOS_PREDEFINIDOS.get(row[2], f"Grupo {row[2]}")) for row in c.fetchall()]
             ITEMS_PER_PAGE = 5
             total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
             if page < 1 or page > total_pages:
@@ -826,12 +813,12 @@ def button_handler(update, context):
                 [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
+            chat_title = GRUPOS_PREDEFINIDOS.get(info['chat_id'], f"Grupo {info['chat_id']}")
             texto = (
                 f"📋 *Solicitud #{ticket}* 🌟\n"
                 f"👤 Usuario: {escape_markdown(info['username'], True)}\n"
                 f"📝 Mensaje: {escape_markdown(info['message_text'])}\n"
-                f"🏠 Grupo: {escape_markdown(info['chat_title'])}\n"
-                f"🕒 Fecha: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}\n"
+                f"🏠 Grupo: {escape_markdown(chat_title)}\n"
                 "Selecciona una acción:"
             )
             query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
@@ -853,11 +840,12 @@ def button_handler(update, context):
         if data.endswith("_confirm"):  # Procesar confirmación
             accion = data.split("_")[2]
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+            chat_title = GRUPOS_PREDEFINIDOS.get(info["chat_id"], f"Grupo {info['chat_id']}")
             set_historial_solicitud(ticket, {
                 "chat_id": info["chat_id"],
                 "username": info["username"],
                 "message_text": info["message_text"],
-                "chat_title": info["chat_title"],
+                "chat_title": chat_title,
                 "estado": accion,
                 "fecha_gestion": datetime.now(SPAIN_TZ),
                 "admin_username": admin_username
@@ -879,22 +867,19 @@ def button_handler(update, context):
             message_text_escaped = escape_markdown(info["message_text"])
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             if notify:
+                canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
                 if accion == "subido":
-                    bot.send_message(chat_id=info["chat_id"], 
+                    bot.send_message(chat_id=canal_info["chat_id"], 
                                    text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
-                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                                   parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "denegado":
-                    bot.send_message(chat_id=info["chat_id"], 
+                    bot.send_message(chat_id=canal_info["chat_id"], 
                                    text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
-                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                                   parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "eliminar":
-                    bot.send_message(chat_id=info["chat_id"], 
+                    bot.send_message(chat_id=canal_info["chat_id"], 
                                    text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
-                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-                    try:
-                        bot.delete_message(chat_id=GROUP_DESTINO, message_id=info["message_id"])
-                    except telegram.error.TelegramError as e:
-                        logger.error(f"No se pudo eliminar el mensaje: {str(e)}")
+                                   parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
             del_peticion_registrada(ticket)
             keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
