@@ -560,59 +560,59 @@ def button_handler(update, context):
         query.edit_message_text(text="📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
         return
 
-if data == "menu_pendientes":
-            try:
-                with get_db_connection() as conn:
-                    c = conn.cursor()
-                    c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-                    pendientes = c.fetchall()
-                if not pendientes:
-                    bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
-                    query.message.delete()
-                    return
+    if data == "menu_pendientes":
+        try:
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                pendientes = c.fetchall()
+            if not pendientes:
+                bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
+                query.message.delete()
+                return
 
-                ITEMS_PER_PAGE = 5
-                page = 1
-                start_idx = (page - 1) * ITEMS_PER_PAGE
-                end_idx = start_idx + ITEMS_PER_PAGE
-                page_items = pendientes[start_idx:end_idx]
-                total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+            ITEMS_PER_PAGE = 5
+            page = 1
+            start_idx = (page - 1) * ITEMS_PER_PAGE
+            end_idx = start_idx + ITEMS_PER_PAGE
+            page_items = pendientes[start_idx:end_idx]
+            total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
 
-                keyboard = []
-                for ticket, username, chat_title in page_items:
-                    try:
-                        username_safe = escape_markdown(username, preserve_username=True)
-                        chat_title_safe = escape_markdown(chat_title)
-                        button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
-                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
-                    except Exception as e:
-                        logger.error(f"Error al procesar ticket #{ticket} con username {username}: {str(e)}")
-                        button_text = f"#{ticket} - {username} ({chat_title})"
-                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
-
-                # Construir los botones de navegación
-                nav_buttons = []
-                if page > 1:
-                    nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-                    keyboard.append(nav_buttons)
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
-                if page < total_pages:
-                    nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-
-                message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
+            keyboard = []
+            for ticket, username, chat_title in page_items:
                 try:
-                    bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode='Markdown')
-                except telegram.error.BadRequest as e:
-                    logger.error(f"Error al enviar mensaje con Markdown: {str(e)}")
-                    bot.send_message(chat_id=chat_id, text=message_text.replace('*', ''), reply_markup=reply_markup)
-                query.message.delete()
+                    username_safe = escape_markdown(username, preserve_username=True)
+                    chat_title_safe = escape_markdown(chat_title)
+                    button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
+                except Exception as e:
+                    logger.error(f"Error al procesar ticket #{ticket} con username {username}: {str(e)}")
+                    button_text = f"#{ticket} - {username} ({chat_title})"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
 
-            except Exception as e:
-                logger.error(f"Error general en menu_pendientes: {str(e)}", exc_info=True)
-                bot.send_message(chat_id=chat_id, text="❌ Ocurrió un error al mostrar las solicitudes pendientes. Por favor, intenta de nuevo más tarde. 🌟", parse_mode='Markdown')
-                query.message.delete()
-            return
+            # Construir los botones de navegación
+            nav_buttons = []
+            if page > 1:
+                nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
+            if page < total_pages:
+                nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
+            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+            keyboard.append(nav_buttons)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
+            try:
+                bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode='Markdown')
+            except telegram.error.BadRequest as e:
+                logger.error(f"Error al enviar mensaje con Markdown: {str(e)}")
+                bot.send_message(chat_id=chat_id, text=message_text.replace('*', ''), reply_markup=reply_markup)
+            query.message.delete()
+
+        except Exception as e:
+            logger.error(f"Error general en menu_pendientes: {str(e)}", exc_info=True)
+            bot.send_message(chat_id=chat_id, text="❌ Ocurrió un error al mostrar las solicitudes pendientes. Por favor, intenta de nuevo más tarde. 🌟", parse_mode='Markdown')
+            query.message.delete()
+        return
 
     if data == "menu_historial":
         with get_db_connection() as conn:
