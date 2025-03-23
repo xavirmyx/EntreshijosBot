@@ -595,12 +595,12 @@ def button_handler(update, context):
 
             nav_buttons = []
             if page > 1:
+                nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+                keyboard.append(nav_buttons)
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-            keyboard.append(nav_buttons)
-            reply_markup = InlineKeyboardMarkup(keyboard)
 
             message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
             try:
