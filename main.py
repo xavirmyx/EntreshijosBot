@@ -594,12 +594,12 @@ def button_handler(update, context):
 
             nav_buttons = []
             if page > 1:
+                nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+                keyboard.append(nav_buttons)
+                reply_markup = InlineKeyboardMarkup(keyboard)
                 nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-            keyboard.append(nav_buttons)
-            reply_markup = InlineKeyboardMarkup(keyboard)
 
             message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
             try:
@@ -692,8 +692,10 @@ def button_handler(update, context):
             bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
             query.message.delete()
             return
+        # Excluir el grupo de administradores (-1002641818457)
         keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                        callback_data=f"select_on_{gid}")] for gid, info in grupos_estados.items()]
+                                        callback_data=f"select_on_{gid}")] 
+                    for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
         keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on"),
                          InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -710,8 +712,10 @@ def button_handler(update, context):
             bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
             query.message.delete()
             return
+        # Excluir el grupo de administradores (-1002641818457)
         keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                        callback_data=f"select_off_{gid}")] for gid, info in grupos_estados.items()]
+                                        callback_data=f"select_off_{gid}")] 
+                    for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
         keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off"),
                          InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
         reply_markup = InlineKeyboardMarkup(keyboard)
