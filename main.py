@@ -406,7 +406,7 @@ def handle_menu(update, context):
     keyboard = [
         [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
         [InlineKeyboardButton("📜 Historial", callback_data="menu_historial")],
-        [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],  # Añadido aquí
+        [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
@@ -818,7 +818,7 @@ def button_handler(update, context):
             query.edit_message_text(text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
             return
 
-        if len(data.split("_")) == 2:
+        if len(data.split("_")) == 2:  # Mostrar opciones iniciales
             keyboard = [
                 [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
                 [InlineKeyboardButton("❌ Denegado", callback_data=f"pend_{ticket}_denegado")],
@@ -837,23 +837,20 @@ def button_handler(update, context):
             query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        accion = data.split("_")[2]
-        if accion in ["subido", "denegado", "eliminar"]:
-            accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
-            keyboard = [
-                [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
-                [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            # Añadimos un emoji único para evitar "Message is not modified"
-            query.edit_message_text(
-                text=f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}? 🔍",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            return
+        if len(data.split("_")) == 3:  # Mostrar confirmación
+            accion = data.split("_")[2]
+            if accion in ["subido", "denegado", "eliminar"]:
+                accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+                keyboard = [
+                    [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
+                    [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}? 🔍\n(Tiempo: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+                query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                return
 
-        if data.endswith("_confirm"):
+        if data.endswith("_confirm"):  # Procesar confirmación
             accion = data.split("_")[2]
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             set_historial_solicitud(ticket, {
@@ -871,47 +868,45 @@ def button_handler(update, context):
                 [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            query.edit_message_text(
-                text=f"✅ *Ticket #{ticket} procesado como {accion_str}.* 🌟\n¿Notificar al usuario?",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
+            texto = f"✅ *Ticket #{ticket} procesado como {accion_str}.* 🌟\n¿Notificar al usuario? (Confirmado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if data.endswith("_notify_yes") or data.endswith("_notify_no"):
+        if data.endswith("_notify_yes") or data.endswith("_notify_no"):  # Manejar notificación
             accion = data.split("_")[2]
             notify = data.endswith("_notify_yes")
             username_escaped = escape_markdown(info["username"], True)
             message_text_escaped = escape_markdown(info["message_text"])
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
-            if accion == "subido" and notify:
-                bot.send_message(chat_id=info["chat_id"], 
-                               text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
-                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-            elif accion == "denegado" and notify:
-                bot.send_message(chat_id=info["chat_id"], 
-                               text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
-                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-            elif accion == "eliminar" and notify:
-                bot.send_message(chat_id=info["chat_id"], 
-                               text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
-                               parse_mode='Markdown', message_thread_id=info.get("thread_id"))
-                try:
-                    bot.delete_message(chat_id=GROUP_DESTINO, message_id=info["message_id"])
-                except telegram.error.TelegramError as e:
-                    logger.error(f"No se pudo eliminar el mensaje: {str(e)}")
+            if notify:
+                if accion == "subido":
+                    bot.send_message(chat_id=info["chat_id"], 
+                                   text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
+                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                elif accion == "denegado":
+                    bot.send_message(chat_id=info["chat_id"], 
+                                   text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
+                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                elif accion == "eliminar":
+                    bot.send_message(chat_id=info["chat_id"], 
+                                   text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
+                                   parse_mode='Markdown', message_thread_id=info.get("thread_id"))
+                    try:
+                        bot.delete_message(chat_id=GROUP_DESTINO, message_id=info["message_id"])
+                    except telegram.error.TelegramError as e:
+                        logger.error(f"No se pudo eliminar el mensaje: {str(e)}")
             del_peticion_registrada(ticket)
             keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            query.edit_message_text(
-                text=f"✅ *Ticket #{ticket} procesado como {accion_str}{' y notificado' if notify else ''}.* 🌟",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
+            texto = f"✅ *Ticket #{ticket} procesado como {accion_str}{' y notificado' if notify else ''}.* 🌟\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if data.endswith("_cancel"):
-            query.edit_message_text(text="❌ Acción cancelada. 🌟", parse_mode='Markdown')
+        if data.endswith("_cancel"):  # Cancelar acción
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            texto = f"❌ Acción cancelada para Ticket #{ticket}. 🌟\n(Cancelado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
 # Añadir handlers
@@ -922,7 +917,7 @@ dispatcher.add_handler(CommandHandler('restar', handle_restar))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
-dispatcher.add_handler(CommandHandler('graficas', handle_graficas))  # Añadido aquí
+dispatcher.add_handler(CommandHandler('graficas', handle_graficas))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
 # Rutas Flask
