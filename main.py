@@ -223,7 +223,6 @@ def escape_markdown(text, preserve_username=False):
     if not text:
         return text
     if preserve_username and text.startswith('@'):
-        # Escapar todos los caracteres especiales dentro del @username
         return ''.join(['\\' + c if c in '_*[]()~`>#+-=|{}.!' else c for c in text])
     characters_to_escape = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in characters_to_escape:
@@ -590,7 +589,6 @@ def button_handler(update, context):
                     button_text = f"#{ticket} - {username} ({chat_title})"
                     keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
 
-            # Construir los botones de navegación
             nav_buttons = []
             if page > 1:
                 nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
@@ -691,7 +689,6 @@ def button_handler(update, context):
             bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
             query.message.delete()
             return
-        # Excluir el grupo de administradores (-1002641818457)
         keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
                                         callback_data=f"select_on_{gid}")] 
                     for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
@@ -711,7 +708,6 @@ def button_handler(update, context):
             bot.send_message(chat_id=chat_id, text="ℹ️ No hay grupos registrados aún. 🌟", parse_mode='Markdown')
             query.message.delete()
             return
-        # Excluir el grupo de administradores (-1002641818457)
         keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
                                         callback_data=f"select_off_{gid}")] 
                     for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
@@ -829,11 +825,11 @@ def button_handler(update, context):
             keyboard = [[InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
                                             callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
             nav_buttons = []
+            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
             if page > 1:
                 nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
             keyboard.append(nav_buttons)
             reply_markup = InlineKeyboardMarkup(keyboard)
             query.edit_message_text(text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
