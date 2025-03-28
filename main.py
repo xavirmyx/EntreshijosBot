@@ -51,6 +51,8 @@ def init_db():
                      (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)''')
         c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
                      (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
+                     (user_id BIGINT PRIMARY KEY, username TEXT)''')  # Nueva tabla para usernames
         conn.commit()
         conn.close()
         logger.info("Base de datos inicializada correctamente.")
@@ -104,7 +106,19 @@ def set_peticiones_por_usuario(user_id, count, chat_id, username, last_reset=Non
                      ON CONFLICT (user_id) DO UPDATE SET 
                      count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
                   (user_id, count, chat_id, username, last_reset))
+        # Actualizar tabla usuarios
+        c.execute("""INSERT INTO usuarios (user_id, username) 
+                     VALUES (%s, %s) 
+                     ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                  (user_id, username))
         conn.commit()
+
+def get_user_id_by_username(username):
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT user_id FROM usuarios WHERE username = %s", (username,))
+        result = c.fetchone()
+        return result[0] if result else None
 
 def get_peticion_registrada(ticket_number):
     with get_db_connection() as conn:
@@ -185,7 +199,7 @@ def add_peticion_incorrecta(user_id, timestamp, chat_id):
         conn.commit()
 
 # Configuraciones estáticas
-admin_ids = set([12345678])
+admin_ids = set([12345678])  # Añade los IDs de los administradores reales
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
     -1001886336551: "Biblioteca Privada EntresHijos",
@@ -282,8 +296,22 @@ def handle_message(update, context):
             logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
-        ticket_number = increment_ticket_counter()
+        # Verificar límite antes de procesar
+        user_data = get_peticiones_por_usuario(user_id)
+        if not user_data:
+            set_peticiones_por_usuario(user_id, 0, chat_id, username)
+            user_data = {"count": 0, "chat_id": chat_id, "username": username}
+        else:
+            if user_data["count"] >= 2 and user_id not in admin_ids:
+                limite_message = f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
+                bot.send_message(chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
+                warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
+                bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
+                logger.info(f"Límite excedido por {username}, advertencia enviada")
+                return
 
+        # Procesar la petición si no se excede el límite
+        ticket_number = increment_ticket_counter()
         destino_message = (
             f"📬 *Nueva solicitud recibida* 🌟\n"
             f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
@@ -318,32 +346,8 @@ def handle_message(update, context):
             })
             logger.error(f"Error al enviar con Markdown: {str(e)}")
 
-        user_data = get_peticiones_por_usuario(user_id)
-        if not user_data:
-            set_peticiones_por_usuario(user_id, 1, chat_id, username)
-            user_data = {"count": 1, "chat_id": chat_id, "username": username}
-        else:
-            user_data["count"] += 1
-            set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
-
-        if user_data["count"] > 2 and user_id not in admin_ids:
-            limite_message = f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
-            bot.send_message(chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
-            bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
-            logger.info(f"Límite excedido por {username}, advertencia enviada")
-
-            set_historial_solicitud(ticket_number, {
-                "chat_id": chat_id,
-                "username": username,
-                "message_text": message_text,
-                "chat_title": chat_title,
-                "estado": "limite_excedido",
-                "fecha_gestion": datetime.now(SPAIN_TZ),
-                "admin_username": "Sistema"
-            })
-            del_peticion_registrada(ticket_number)
-            return
+        user_data["count"] += 1
+        set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
 
         destino_message = (
             f"📬 *Nueva solicitud recibida* 🌟\n"
@@ -419,7 +423,7 @@ def handle_menu(update, context):
     sent_message = bot.send_message(chat_id=chat_id, text=f"👤 {admin_username}\n📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
     menu_activos[(chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
 
-def handle_sumar(update, context):
+def handle_sumar_command(update, context):
     if not update.message:
         return
     message = update.message
@@ -427,9 +431,30 @@ def handle_sumar(update, context):
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
         return
-    bot.send_message(chat_id=chat_id, text="➕ *Sumar peticiones* 🌟\nPor favor, escribe: /sumar @username [número]", parse_mode='Markdown')
+    args = context.args
+    if len(args) < 2:
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /sumar @username [número] 🌟", parse_mode='Markdown')
+        return
+    username = args[0]
+    try:
+        amount = int(args[1])
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ El número debe ser un entero. 🌟", parse_mode='Markdown')
+        return
+    user_id = get_user_id_by_username(username)
+    if not user_id:
+        bot.send_message(chat_id=chat_id, text=f"❗ Usuario {username} no encontrado. 🌟", parse_mode='Markdown')
+        return
+    user_data = get_peticiones_por_usuario(user_id)
+    if not user_data:
+        set_peticiones_por_usuario(user_id, amount, chat_id, username)
+        bot.send_message(chat_id=chat_id, text=f"✅ Se han sumado {amount} peticiones a {username}. 🌟", parse_mode='Markdown')
+    else:
+        new_count = user_data['count'] + amount
+        set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], user_data['username'])
+        bot.send_message(chat_id=chat_id, text=f"✅ Se han sumado {amount} peticiones a {username}. Nuevo total: {new_count}/2 🌟", parse_mode='Markdown')
 
-def handle_restar(update, context):
+def handle_restar_command(update, context):
     if not update.message:
         return
     message = update.message
@@ -437,7 +462,27 @@ def handle_restar(update, context):
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
         return
-    bot.send_message(chat_id=chat_id, text="➖ *Restar peticiones* 🌟\nPor favor, escribe: /restar @username [número]", parse_mode='Markdown')
+    args = context.args
+    if len(args) < 2:
+        bot.send_message(chat_id=chat_id, text="❗ Uso: /restar @username [número] 🌟", parse_mode='Markdown')
+        return
+    username = args[0]
+    try:
+        amount = int(args[1])
+    except ValueError:
+        bot.send_message(chat_id=chat_id, text="❗ El número debe ser un entero. 🌟", parse_mode='Markdown')
+        return
+    user_id = get_user_id_by_username(username)
+    if not user_id:
+        bot.send_message(chat_id=chat_id, text=f"❗ Usuario {username} no encontrado. 🌟", parse_mode='Markdown')
+        return
+    user_data = get_peticiones_por_usuario(user_id)
+    if not user_data:
+        bot.send_message(chat_id=chat_id, text=f"❗ Usuario {username} no tiene peticiones registradas. 🌟", parse_mode='Markdown')
+    else:
+        new_count = max(0, user_data['count'] - amount)
+        set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], user_data['username'])
+        bot.send_message(chat_id=chat_id, text=f"✅ Se han restado {amount} peticiones a {username}. Nuevo total: {new_count}/2 🌟", parse_mode='Markdown')
 
 def handle_ping(update, context):
     if not update.message:
@@ -571,57 +616,59 @@ def button_handler(update, context):
         return
 
     if data == "menu_pendientes":
-            try:
-                with get_db_connection() as conn:
-                    c = conn.cursor()
-                    c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-                    pendientes = c.fetchall()
-                if not pendientes:
-                    bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
-                    query.message.delete()
-                    return
+        try:
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
+                pendientes = c.fetchall()
+            if not pendientes:
+                bot.send_message(chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
+                query.message.delete()
+                return
 
-                ITEMS_PER_PAGE = 5
-                page = 1
-                start_idx = (page - 1) * ITEMS_PER_PAGE
-                end_idx = start_idx + ITEMS_PER_PAGE
-                page_items = pendientes[start_idx:end_idx]
-                total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+            ITEMS_PER_PAGE = 5
+            page = 1
+            start_idx = (page - 1) * ITEMS_PER_PAGE
+            end_idx = start_idx + ITEMS_PER_PAGE
+            page_items = pendientes[start_idx:end_idx]
+            total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
 
-                keyboard = []
-                for ticket, username, chat_title in page_items:
-                    try:
-                        username_safe = escape_markdown(username, preserve_username=True)
-                        chat_title_safe = escape_markdown(chat_title)
-                        button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
-                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
-                    except Exception as e:
-                        logger.error(f"Error al procesar ticket #{ticket} con username {username}: {str(e)}")
-                        button_text = f"#{ticket} - {username} ({chat_title})"
-                        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
-
-                nav_buttons = []
-                nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
-                if page > 1:
-                    nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
-                if page < total_pages:
-                    nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
-                keyboard.append(nav_buttons)
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
+            keyboard = []
+            for ticket, username, chat_title in page_items:
                 try:
-                    bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode='Markdown')
-                except telegram.error.BadRequest as e:
-                    logger.error(f"Error al enviar mensaje con Markdown: {str(e)}")
-                    bot.send_message(chat_id=chat_id, text=message_text.replace('*', ''), reply_markup=reply_markup)
-                query.message.delete()
+                    username_safe = escape_markdown(username, preserve_username=True)
+                    chat_title_safe = escape_markdown(chat_title)
+                    button_text = f"#{ticket} - {username_safe} ({chat_title_safe})"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
+                except Exception as e:
+                    logger.error(f"Error al procesar ticket #{ticket} con username {username}: {str(e)}")
+                    button_text = f"#{ticket} - {username} ({chat_title})"
+                    keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pend_{ticket}")])
 
-            except Exception as e:
-                logger.error(f"Error general en menu_pendientes: {str(e)}", exc_info=True)
-                bot.send_message(chat_id=chat_id, text="❌ Ocurrió un error al mostrar las solicitudes pendientes. Por favor, intenta de nuevo más tarde. 🌟", parse_mode='Markdown')
-                query.message.delete()
-            return
+            nav_buttons = [
+                InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"),
+                InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")
+            ]
+            if page > 1:
+                nav_buttons.insert(1, InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
+            if page < total_pages:
+                nav_buttons.insert(-1, InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
+            keyboard.append(nav_buttons)
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            message_text = f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:"
+            try:
+                bot.send_message(chat_id=chat_id, text=message_text, reply_markup=reply_markup, parse_mode='Markdown')
+            except telegram.error.BadRequest as e:
+                logger.error(f"Error al enviar mensaje con Markdown: {str(e)}")
+                bot.send_message(chat_id=chat_id, text=message_text.replace('*', ''), reply_markup=reply_markup)
+            query.message.delete()
+
+        except Exception as e:
+            logger.error(f"Error general en menu_pendientes: {str(e)}", exc_info=True)
+            bot.send_message(chat_id=chat_id, text="❌ Ocurrió un error al mostrar las solicitudes pendientes. Por favor, intenta de nuevo más tarde. 🌟", parse_mode='Markdown')
+            query.message.delete()
+        return
 
     if data == "menu_historial":
         with get_db_connection() as conn:
@@ -653,7 +700,7 @@ def button_handler(update, context):
                 f"📌 Estado: {estado_str}\n"
             )
         historial_message = "📜 *Historial de Solicitudes Gestionadas* 🌟\n\n" + "\n".join(historial[:5])
-        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         bot.send_message(chat_id=chat_id, text=historial_message, reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
@@ -674,7 +721,7 @@ def button_handler(update, context):
             f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
             f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
         )
-        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         bot.send_message(chat_id=chat_id, text=stats_msg, reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
@@ -688,7 +735,7 @@ def button_handler(update, context):
             return
         estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
                            for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
-        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
+        keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         bot.send_message(chat_id=chat_id, text=f"📋 *Estado de los grupos* 🌟\n{estado}", reply_markup=reply_markup, parse_mode='Markdown')
         query.message.delete()
@@ -835,12 +882,14 @@ def button_handler(update, context):
 
             keyboard = [[InlineKeyboardButton(f"#{ticket} - {username} ({chat_title})",
                                             callback_data=f"pend_{ticket}")] for ticket, username, chat_title in page_items]
-            nav_buttons = []
-            nav_buttons.append(InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"))
+            nav_buttons = [
+                InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"),
+                InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")
+            ]
             if page > 1:
-                nav_buttons.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
+                nav_buttons.insert(1, InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
-                nav_buttons.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
+                nav_buttons.insert(-1, InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
             keyboard.append(nav_buttons)
             reply_markup = InlineKeyboardMarkup(keyboard)
             query.edit_message_text(text=f"📋 *Solicitudes pendientes (Página {page}/{total_pages})* 🌟\nSelecciona una solicitud:", 
@@ -900,7 +949,7 @@ def button_handler(update, context):
             keyboard = [
                 [InlineKeyboardButton("✅ Sí", callback_data=f"pend_{ticket}_{accion}_notify_yes"),
                  InlineKeyboardButton("❌ No", callback_data=f"pend_{ticket}_{accion}_notify_no")],
-                [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]
+                [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"✅ *Ticket #{ticket} procesado como {accion_str}.* 🌟\n¿Notificar al usuario? (Confirmado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
@@ -931,14 +980,14 @@ def button_handler(update, context):
                     except telegram.error.TelegramError as e:
                         logger.error(f"No se pudo eliminar el mensaje: {str(e)}")
             del_peticion_registrada(ticket)
-            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"✅ *Ticket #{ticket} procesado como {accion_str}{' y notificado' if notify else ''}.* 🌟\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
             query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
         if data.endswith("_cancel"):  # Cancelar acción
-            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]]
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"❌ Acción cancelada para Ticket #{ticket}. 🌟\n(Cancelado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
             query.edit_message_text(text=texto, reply_markup=reply_markup, parse_mode='Markdown')
@@ -947,8 +996,8 @@ def button_handler(update, context):
 # Añadir handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
-dispatcher.add_handler(CommandHandler('sumar', handle_sumar))
-dispatcher.add_handler(CommandHandler('restar', handle_restar))
+dispatcher.add_handler(CommandHandler('sumar', handle_sumar_command))
+dispatcher.add_handler(CommandHandler('restar', handle_restar_command))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('estado', handle_estado))
