@@ -1,6 +1,6 @@
 from flask import Flask, request
 import telegram
-from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler
+from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler, JobQueue
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime, timedelta
 import pytz
@@ -26,12 +26,14 @@ logger = logging.getLogger(__name__)
 bot = telegram.Bot(token=TOKEN)
 app = Flask(__name__)
 
-# Configura el Dispatcher
+# Configura el Dispatcher y JobQueue
 dispatcher = Dispatcher(bot, None, workers=1)
+job_queue = JobQueue()
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
 # Variables globales
 grupos_seleccionados = {}
+menu_activos = {}  # Para rastrear los menús activos y sus tiempos
 
 # Inicialización de la base de datos PostgreSQL
 def init_db():
@@ -240,6 +242,19 @@ def update_grupos_estados(chat_id, title=None):
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
+# Función para cerrar automáticamente el menú
+def auto_close_menu(context):
+    job = context.job
+    chat_id, message_id = job.context
+    if (chat_id, message_id) in menu_activos:
+        try:
+            bot.delete_message(chat_id=chat_id, message_id=message_id)
+            del menu_activos[(chat_id, message_id)]
+            logger.info(f"Menú cerrado automáticamente en chat {chat_id}, mensaje {message_id}")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al cerrar menú automáticamente: {str(e)}")
+            del menu_activos[(chat_id, message_id)]
+
 # Función para manejar mensajes
 def handle_message(update, context):
     if not update.message:
@@ -400,6 +415,7 @@ def handle_menu(update, context):
         return
     message = update.message
     chat_id = message.chat_id
+    admin_username = f"@{update.message.from_user.username}" if update.message.from_user.username else "Admin sin @"
     if str(chat_id) != GROUP_DESTINO:
         bot.send_message(chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
         return
@@ -410,10 +426,13 @@ def handle_menu(update, context):
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-        [InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")]
+        [InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+        [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    bot.send_message(chat_id=chat_id, text="📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
+    sent_message = bot.send_message(chat_id=chat_id, text=f"👤 {admin_username}\n📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
+    menu_activos[(chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
+    job_queue.run_once(auto_close_menu, 300, context=(chat_id, sent_message.message_id))  # 300 segundos = 5 minutos
 
 def handle_sumar(update, context):
     if not update.message:
@@ -457,7 +476,7 @@ def handle_ayuda(update, context):
         f"📖 *Guía rápida* 🌟\n"
         f"Hola {username}, usa {', '.join(VALID_REQUEST_COMMANDS)} para enviar una solicitud (máx. 2/día).\n"
         "🔍 */estado [ticket]* - Consulta el estado.\n"
-        "🌟 *¡Gracias por usar el bot!* 🙌"
+        "🌟 *¡Gracias por usar el bot!* ᐸ"
     )
     bot.send_message(chat_id=canal_info["chat_id"], text=ayuda_message, parse_mode='Markdown', 
                      message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
@@ -545,6 +564,12 @@ def button_handler(update, context):
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
     logger.debug(f"Botón presionado: {data}")
 
+    # Actualizar timestamp del menú activo si existe
+    if (chat_id, query.message.message_id) in menu_activos:
+        menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+        # Reprogramar el autocierre
+        job_queue.run_once(auto_close_menu, 300, context=(chat_id, query.message.message_id))
+
     if data == "menu_principal":
         keyboard = [
             [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
@@ -553,10 +578,17 @@ def button_handler(update, context):
             [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
             [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
             [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-            [InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")]
+            [InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+            [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        query.edit_message_text(text="📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
+        query.edit_message_text(text=f"👤 {admin_username}\n📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
+        return
+
+    if data == "menu_close":
+        query.message.delete()
+        if (chat_id, query.message.message_id) in menu_activos:
+            del menu_activos[(chat_id, query.message.message_id)]
         return
 
     if data == "menu_pendientes":
@@ -966,10 +998,11 @@ def webhook():
 def health_check():
     return "Bot de Entreshijos está activo! 🌟", 200
 
-# Inicializar la base de datos al arrancar el servidor
+# Inicializar la base de datos y JobQueue al arrancar el servidor
 init_db()
 for chat_id, title in GRUPOS_PREDEFINIDOS.items():
     set_grupo_estado(chat_id, title)
+job_queue.start()
 
 if __name__ == '__main__':
     logger.info("Iniciando bot en modo local")
