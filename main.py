@@ -1,6 +1,6 @@
 from flask import Flask, request
 import telegram
-from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler, JobQueue
+from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from datetime import datetime, timedelta
 import pytz
@@ -26,9 +26,8 @@ logger = logging.getLogger(__name__)
 bot = telegram.Bot(token=TOKEN)
 app = Flask(__name__)
 
-# Configura el Dispatcher y JobQueue
-dispatcher = Dispatcher(bot, None, workers=1)
-job_queue = JobQueue()
+# Configura el Dispatcher
+dispatcher = Dispatcher(bot, None, workers=0)  # workers=0 para webhook
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
 # Variables globales
@@ -242,19 +241,6 @@ def update_grupos_estados(chat_id, title=None):
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
-# Función para cerrar automáticamente el menú
-def auto_close_menu(context):
-    job = context.job
-    chat_id, message_id = job.context
-    if (chat_id, message_id) in menu_activos:
-        try:
-            bot.delete_message(chat_id=chat_id, message_id=message_id)
-            del menu_activos[(chat_id, message_id)]
-            logger.info(f"Menú cerrado automáticamente en chat {chat_id}, mensaje {message_id}")
-        except telegram.error.TelegramError as e:
-            logger.error(f"Error al cerrar menú automáticamente: {str(e)}")
-            del menu_activos[(chat_id, message_id)]
-
 # Función para manejar mensajes
 def handle_message(update, context):
     if not update.message:
@@ -406,7 +392,7 @@ def handle_message(update, context):
             warn_message = f"/warn {username_escaped} Abuso de peticiones mal formuladas"
 
         bot.send_message(chat_id=canal_info["chat_id"], text=notificacion_incorrecta, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, parse_mode='Markdown', message_thread_id=None)
+        bot.send_message(chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
         logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
 # Handlers de comandos
@@ -432,7 +418,6 @@ def handle_menu(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     sent_message = bot.send_message(chat_id=chat_id, text=f"👤 {admin_username}\n📋 *Menú Principal* 🌟\nSelecciona una opción:", reply_markup=reply_markup, parse_mode='Markdown')
     menu_activos[(chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
-    job_queue.run_once(auto_close_menu, 300, context=(chat_id, sent_message.message_id))  # 300 segundos = 5 minutos
 
 def handle_sumar(update, context):
     if not update.message:
@@ -563,12 +548,6 @@ def button_handler(update, context):
     chat_id = query.message.chat_id
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
     logger.debug(f"Botón presionado: {data}")
-
-    # Actualizar timestamp del menú activo si existe
-    if (chat_id, query.message.message_id) in menu_activos:
-        menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
-        # Reprogramar el autocierre
-        job_queue.run_once(auto_close_menu, 300, context=(chat_id, query.message.message_id))
 
     if data == "menu_principal":
         keyboard = [
@@ -998,11 +977,10 @@ def webhook():
 def health_check():
     return "Bot de Entreshijos está activo! 🌟", 200
 
-# Inicializar la base de datos y JobQueue al arrancar el servidor
+# Inicializar la base de datos al arrancar el servidor
 init_db()
 for chat_id, title in GRUPOS_PREDEFINIDOS.items():
     set_grupo_estado(chat_id, title)
-job_queue.start()
 
 if __name__ == '__main__':
     logger.info("Iniciando bot en modo local")
