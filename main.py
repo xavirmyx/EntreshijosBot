@@ -248,10 +248,10 @@ CANALES_PETICIONES = {
     -1002348662107: {"chat_id": -1002348662107, "thread_id": 53411},
 }
 VALID_REQUEST_COMMANDS = [
-    '/solicito', '/solícito', '#SOLÍCITO', '#SOLICITO',
-    '/Solicito', '/Solícito', '#SOLÍCITO', '#SOLICITO',
-    '/petición', '#petición', '/PETICIÓN', '#PETICION',
-    '/Petición', '#Petición', '/PETICIÓN', '#PETICION'
+    '/solicito', '/solícito', '/SOLÍCITO', '/SOLICITO', '/Solicito', '/Solícito',
+    '#solicito', '#solícito', '#SOLÍCITO', '#SOLICITO', '#Solícito', '#Solicito',
+    '/petición', '/peticion', '/PETICIÓN', '/PETICION', '/Petición', '/Peticion',
+    '#petición', '#peticion', '#PETICIÓN', '#PETICION', '#Petición', '#Peticion',
 ]
 frases_agradecimiento = [
     "¡Gracias por tu paciencia! 🙌",
