@@ -317,9 +317,9 @@ def handle_message(update, context):
         logger.info(f"Solicitud recibida de {username} en {chat_title}: {message_text}")
         if chat_id not in CANALES_PETICIONES or thread_id != CANALES_PETICIONES[chat_id]["thread_id"]:
             notificacion = f"🚫 {username_escaped}, las solicitudes solo son válidas en el canal de peticiones correspondiente. 🌟"
-            warn_message = f"/warn {username_escaped} Petición fuera del canal correspondiente."
+            warn_message = f"/warn {username_escaped} (Petición fuera del canal correspondiente)"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
+            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
             logger.info(f"Solicitud de {username} denegada: fuera del canal correcto")
             return
 
@@ -335,9 +335,9 @@ def handle_message(update, context):
             user_data = {"count": 0, "chat_id": chat_id, "username": username}
         elif user_data["count"] >= 2 and user_id not in admin_ids:
             limite_message = f"🚫 Lo siento {username_escaped}, has alcanzado el límite de 2 peticiones por día. Intenta mañana. 🌟"
-            warn_message = f"/warn {username_escaped} Límite de peticiones diarias superado"
+            warn_message = f"/warn {username_escaped} (Límite de peticiones diarias superado)"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
+            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
             logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
 
@@ -388,7 +388,6 @@ def handle_message(update, context):
             f"🏠 Grupo: {chat_title_escaped}\n"
             f"📅 Fecha: {timestamp_str}\n"
             f"📝 Mensaje: {message_text_escaped}\n"
-            f"🔍 Consulta con: /estado {ticket_number}\n"
             "⏳ Será atendida pronto. 🙌"
         )
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=confirmacion_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
@@ -403,12 +402,10 @@ def handle_message(update, context):
             f"⚠️ {username_escaped}, usa solo: {', '.join(VALID_REQUEST_COMMANDS)}.\n"
             "Consulta /ayuda para más detalles. 🌟"
         )
-        warn_message = f"/warn {username_escaped} Petición mal formulada"
-        if len(intentos_recientes) > 2:
-            warn_message = f"/warn {username_escaped} Abuso de peticiones mal formuladas"
+        warn_message = f"/warn {username_escaped} (Petición mal formulada)" if len(intentos_recientes) <= 2 else f"/warn {username_escaped} (Abuso de peticiones mal formuladas)"
 
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion_incorrecta, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=None)
+        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
         logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
 # Handlers de comandos
@@ -428,7 +425,7 @@ def handle_menu(update, context):
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-        [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+        [InlineKeyboardButton("🧹 Limpi Ir", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
         [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -456,14 +453,16 @@ def handle_sumar_command(update, context):
     except ValueError:
         safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ El número debe ser un entero positivo. 🌟", parse_mode='Markdown')
         return
+
     user_id = get_user_id_by_username(target_username)
     if not user_id:
         safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❗ Usuario {target_username} no encontrado. 🌟", parse_mode='Markdown')
         return
+
     user_data = get_peticiones_por_usuario(user_id)
     if not user_data:
         set_peticiones_por_usuario(user_id, amount, chat_id, target_username)
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ Se han sumado {amount} peticiones a {target_username}. 🌟", parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ Se han sumado {amount} peticiones a {target_username}. Total: {amount}/2 🌟", parse_mode='Markdown')
     else:
         new_count = user_data['count'] + amount
         set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], target_username)
@@ -522,59 +521,10 @@ def handle_ayuda(update, context):
     ayuda_message = (
         f"📖 *Guía rápida* 🌟\n"
         f"Hola {username}, usa {', '.join(VALID_REQUEST_COMMANDS)} para enviar una solicitud (máx. 2/día).\n"
-        "🔍 */estado [ticket]* - Consulta el estado.\n"
         "🌟 *¡Gracias por usar el bot!* 🙌"
     )
     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=ayuda_message, parse_mode='Markdown', 
                     message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-
-def handle_estado(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
-    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
-    username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
-    args = context.args
-    if not args:
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text="❗ Uso: /estado [ticket] 🌟", parse_mode='Markdown', 
-                        message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-        return
-    try:
-        ticket = int(args[0])
-        info = get_peticion_registrada(ticket)
-        if info:
-            estado_message = (
-                f"📋 *Estado* 🌟\n"
-                f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
-                f"Estado: Pendiente ⏳\n"
-                f"🕒 Enviada: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}"
-            )
-        else:
-            info = get_historial_solicitud(ticket)
-            if info:
-                estado_str = {
-                    "subido": "✅ Aceptada",
-                    "denegado": "❌ Denegada",
-                    "eliminado": "🗑️ Eliminada",
-                    "notificado": "📢 Respondida",
-                    "limite_excedido": "🚫 Límite excedido"
-                }.get(info["estado"], "🔄 Desconocido")
-                estado_message = (
-                    f"📋 *Estado* 🌟\n"
-                    f"Ticket #{ticket}: {escape_markdown(info['message_text'])}\n"
-                    f"Estado: {estado_str}\n"
-                    f"🕒 Gestionada: {info['fecha_gestion'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-                    f"👥 Admin: {info['admin_username']}"
-                )
-            else:
-                estado_message = f"📋 *Estado* 🌟\nTicket #{ticket}: No encontrado. 🔍"
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=estado_message, parse_mode='Markdown', 
-                        message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-    except ValueError:
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text="❗ Ticket debe ser un número. 🌟", parse_mode='Markdown', 
-                        message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
 def handle_graficas(update, context):
     if not update.message:
@@ -956,15 +906,15 @@ def button_handler(update, context):
                 canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
                 if accion == "subido":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida. 🎉", 
+                                   text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida por el *Equipo de administración EntresHijos*. 🎉", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "denegado":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada. 🌟", 
+                                   text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada por el *Equipo de administración EntresHijos*. 🌟", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "eliminar":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada. 🌟", 
+                                   text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido eliminada por el *Equipo de administración EntresHijos*. 🌟", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                     safe_bot_method(bot.delete_message, chat_id=GROUP_DESTINO, message_id=info["message_id"])
             del_peticion_registrada(ticket)
@@ -988,7 +938,6 @@ dispatcher.add_handler(CommandHandler('sumar', handle_sumar_command))
 dispatcher.add_handler(CommandHandler('restar', handle_restar_command))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
-dispatcher.add_handler(CommandHandler('estado', handle_estado))
 dispatcher.add_handler(CommandHandler('graficas', handle_graficas))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
