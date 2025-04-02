@@ -241,12 +241,22 @@ def add_peticion_incorrecta(user_id, timestamp, chat_id):
 
 def clean_database():
     conn = get_db_connection()
+    stats = {"peticiones_registradas_eliminadas": 0, "peticiones_incorrectas_eliminadas": 0}
     try:
         with conn.cursor() as c:
+            # Contar y eliminar peticiones registradas marcadas como eliminadas
+            c.execute("SELECT COUNT(*) FROM peticiones_registradas WHERE ticket_number IN (SELECT ticket_number FROM historial_solicitudes WHERE estado = 'eliminado')")
+            stats["peticiones_registradas_eliminadas"] = c.fetchone()[0]
             c.execute("DELETE FROM peticiones_registradas WHERE ticket_number IN (SELECT ticket_number FROM historial_solicitudes WHERE estado = 'eliminado')")
+
+            # Contar y eliminar peticiones incorrectas antiguas
+            c.execute("SELECT COUNT(*) FROM peticiones_incorrectas WHERE timestamp < %s", (datetime.now(SPAIN_TZ) - timedelta(days=30),))
+            stats["peticiones_incorrectas_eliminadas"] = c.fetchone()[0]
             c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s", (datetime.now(SPAIN_TZ) - timedelta(days=30),))
+
             conn.commit()
         logger.info("Base de datos limpiada de registros obsoletos.")
+        return stats
     except psycopg2.Error as e:
         logger.error(f"Error al limpiar la base de datos: {str(e)}")
         raise
@@ -263,9 +273,26 @@ def get_advanced_stats():
             gestionadas = c.fetchone()[0]
             c.execute("SELECT COUNT(*) FROM usuarios")
             usuarios = c.fetchone()[0]
-            return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
+            # Estadísticas para gráficas
+            c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+            estado_counts = dict(c.fetchall())
+            return {
+                "pendientes": pendientes,
+                "gestionadas": gestionadas,
+                "usuarios": usuarios,
+                "estado_counts": estado_counts
+            }
     except psycopg2.Error as e:
         logger.error(f"Error al obtener estadísticas avanzadas: {str(e)}")
         raise
+    finally:
+        release_db_connection(conn)
+
+def update_priority(ticket_number, priority):
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("UPDATE peticiones_registradas SET priority = %s WHERE ticket_number = %s", (priority, ticket_number))
+            conn.commit()
     finally:
         release_db_connection(conn)
