@@ -9,8 +9,12 @@ import random
 import logging
 import psycopg2
 from psycopg2.extras import DictCursor
+from psycopg2.pool import SimpleConnectionPool
+import threading
+import time
+from telegram.error import TelegramError
 
-# Configura tu token, grupo y URL del webhook usando variables de entorno
+# Configuración inicial
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
@@ -18,221 +22,265 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
 
-# Configura el logging
+# Configuración de logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Inicializa el bot y Flask
+# Inicialización de Flask y Telegram
 bot = telegram.Bot(token=TOKEN)
 app = Flask(__name__)
-
-# Configura el Dispatcher
 dispatcher = Dispatcher(bot, None, workers=0)
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
+
+# Pool de conexiones a la base de datos
+db_pool = SimpleConnectionPool(1, 5, dsn=DATABASE_URL, cursor_factory=DictCursor)
 
 # Variables globales
 grupos_seleccionados = {}
 menu_activos = {}
 
-# Función para manejar métodos del bot de forma segura
-def safe_bot_method(method, *args, **kwargs):
-    try:
-        return method(*args, **kwargs)
-    except telegram.error.Unauthorized:
-        logger.warning(f"Bot no autorizado para realizar la acción en {kwargs.get('chat_id', 'desconocido')}")
-        return None
-    except telegram.error.TelegramError as e:
-        logger.error(f"Error de Telegram: {str(e)}")
-        return None
+# Función para manejar métodos del bot con reintentos
+def safe_bot_method(method, retries=3, delay=1, *args, **kwargs):
+    for attempt in range(retries):
+        try:
+            return method(*args, **kwargs)
+        except TelegramError as e:
+            logger.error(f"Intento {attempt + 1} fallido: {str(e)}")
+            if attempt < retries - 1:
+                time.sleep(delay)
+            else:
+                logger.error(f"Error persistente: {str(e)}")
+                return None
 
-# Inicialización de la base de datos PostgreSQL
+# Funciones de conexión a la base de datos
+def get_db_connection():
+    return db_pool.getconn()
+
+def release_db_connection(conn):
+    db_pool.putconn(conn)
+
+# Inicialización de la base de datos
 def init_db():
-    conn = None
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
-                     (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT, last_reset TIMESTAMP WITH TIME ZONE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
-                     (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
-                      chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS grupos_estados 
-                     (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
-                     (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
-                     (user_id BIGINT PRIMARY KEY, username TEXT)''')
-        conn.commit()
-        logger.info("Base de datos inicializada correctamente.")
+        with conn.cursor() as c:
+            c.execute('''CREATE TABLE IF NOT EXISTS peticiones_por_usuario 
+                         (user_id BIGINT PRIMARY KEY, count INTEGER, chat_id BIGINT, username TEXT, last_reset TIMESTAMP WITH TIME ZONE)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS peticiones_registradas 
+                         (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+                          message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT, priority INTEGER DEFAULT 0)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS historial_solicitudes 
+                         (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
+                          chat_title TEXT, estado TEXT, fecha_gestion TIMESTAMP WITH TIME ZONE, admin_username TEXT, url TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS grupos_estados 
+                         (chat_id BIGINT PRIMARY KEY, title TEXT, activo BOOLEAN DEFAULT TRUE)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS peticiones_incorrectas 
+                         (id SERIAL PRIMARY KEY, user_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_id BIGINT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
+                         (user_id BIGINT PRIMARY KEY, username TEXT)''')
+            conn.commit()
+            logger.info("Base de datos inicializada correctamente.")
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos: {str(e)}")
         raise
     finally:
-        if conn:
-            conn.close()
-
-def get_db_connection():
-    try:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor, connect_timeout=10)
-    except psycopg2.OperationalError as e:
-        logger.error(f"Error al conectar a la base de datos: {str(e)}")
-        raise
+        release_db_connection(conn)
 
 # Funciones de utilidad para la base de datos
 def get_ticket_counter():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT COALESCE(MAX(ticket_number), 0) FROM peticiones_registradas")
-        max_registradas = c.fetchone()[0]
-        c.execute("SELECT COALESCE(MAX(ticket_number), 0) FROM historial_solicitudes")
-        max_historial = c.fetchone()[0]
-        return max(max_registradas, max_historial)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT GREATEST(COALESCE(MAX(ticket_number), 0)) FROM ("
+                      "SELECT ticket_number FROM peticiones_registradas "
+                      "UNION SELECT ticket_number FROM historial_solicitudes) AS combined")
+            return c.fetchone()[0]
+    finally:
+        release_db_connection(conn)
 
 def increment_ticket_counter():
     return get_ticket_counter() + 1
 
 def get_peticiones_por_usuario(user_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT count, chat_id, username, last_reset FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
-        result = c.fetchone()
-        if result:
-            result_dict = dict(result)
-            now = datetime.now(SPAIN_TZ)
-            last_reset = result_dict['last_reset'].astimezone(SPAIN_TZ) if result_dict['last_reset'] else None
-            if not last_reset or (now - last_reset).total_seconds() >= 86400:
-                result_dict['count'] = 0
-                result_dict['last_reset'] = now
-                set_peticiones_por_usuario(user_id, 0, result_dict['chat_id'], result_dict['username'], now)
-            return result_dict
-        return None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT count, chat_id, username, last_reset FROM peticiones_por_usuario WHERE user_id = %s", (user_id,))
+            result = c.fetchone()
+            if result:
+                result_dict = dict(result)
+                now = datetime.now(SPAIN_TZ)
+                last_reset = result_dict['last_reset'].astimezone(SPAIN_TZ) if result_dict['last_reset'] else None
+                if not last_reset or (now - last_reset).total_seconds() >= 86400:
+                    result_dict['count'] = 0
+                    result_dict['last_reset'] = now
+                    set_peticiones_por_usuario(user_id, 0, result_dict['chat_id'], result_dict['username'], now)
+                return result_dict
+            return None
+    finally:
+        release_db_connection(conn)
 
 def set_peticiones_por_usuario(user_id, count, chat_id, username, last_reset=None):
     if last_reset is None:
         last_reset = datetime.now(SPAIN_TZ)
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("""INSERT INTO peticiones_por_usuario (user_id, count, chat_id, username, last_reset) 
-                     VALUES (%s, %s, %s, %s, %s)
-                     ON CONFLICT (user_id) DO UPDATE SET 
-                     count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
-                  (user_id, count, chat_id, username, last_reset))
-        c.execute("""INSERT INTO usuarios (user_id, username) 
-                     VALUES (%s, %s) 
-                     ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
-                  (user_id, username))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO peticiones_por_usuario (user_id, count, chat_id, username, last_reset) 
+                         VALUES (%s, %s, %s, %s, %s)
+                         ON CONFLICT (user_id) DO UPDATE SET 
+                         count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
+                      (user_id, count, chat_id, username, last_reset))
+            c.execute("""INSERT INTO usuarios (user_id, username) 
+                         VALUES (%s, %s) 
+                         ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                      (user_id, username))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def get_user_id_by_username(username):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT user_id FROM usuarios WHERE username = %s", (username,))
-        result = c.fetchone()
-        return result[0] if result else None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT user_id FROM usuarios WHERE username = %s", (username,))
+            result = c.fetchone()
+            return result[0] if result else None
+    finally:
+        release_db_connection(conn)
 
 def get_peticion_registrada(ticket_number):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT chat_id, username, message_text, message_id, timestamp, chat_title, thread_id "
-                  "FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
-        result = c.fetchone()
-        return dict(result) if result else None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT chat_id, username, message_text, message_id, timestamp, chat_title, thread_id, priority "
+                      "FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
+            result = c.fetchone()
+            return dict(result) if result else None
+    finally:
+        release_db_connection(conn)
 
 def set_peticion_registrada(ticket_number, data):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("""INSERT INTO peticiones_registradas 
-                     (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
-                     message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
-                     thread_id = EXCLUDED.thread_id""",
-                  (ticket_number, data["chat_id"], data["username"], data["message_text"],
-                   data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"]))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO peticiones_registradas 
+                         (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id, priority) 
+                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ON CONFLICT (ticket_number) DO UPDATE SET 
+                         chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
+                         message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
+                         thread_id = EXCLUDED.thread_id, priority = EXCLUDED.priority""",
+                      (ticket_number, data["chat_id"], data["username"], data["message_text"],
+                       data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"], data.get("priority", 0)))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def del_peticion_registrada(ticket_number):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("DELETE FROM peticiones_registradas WHERE ticket_number = %s", (ticket_number,))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def get_historial_solicitud(ticket_number):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username "
-                  "FROM historial_solicitudes WHERE ticket_number = %s", (ticket_number,))
-        result = c.fetchone()
-        return dict(result) if result else None
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username, url "
+                      "FROM historial_solicitudes WHERE ticket_number = %s", (ticket_number,))
+            result = c.fetchone()
+            return dict(result) if result else None
+    finally:
+        release_db_connection(conn)
 
 def set_historial_solicitud(ticket_number, data):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("""INSERT INTO historial_solicitudes 
-                     (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
-                     chat_title = EXCLUDED.chat_title, estado = EXCLUDED.estado, fecha_gestion = EXCLUDED.fecha_gestion, 
-                     admin_username = EXCLUDED.admin_username""",
-                  (ticket_number, data["chat_id"], data["username"], data["message_text"],
-                   data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"]))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO historial_solicitudes 
+                         (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username, url) 
+                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ON CONFLICT (ticket_number) DO UPDATE SET 
+                         chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
+                         chat_title = EXCLUDED.chat_title, estado = EXCLUDED.estado, fecha_gestion = EXCLUDED.fecha_gestion, 
+                         admin_username = EXCLUDED.admin_username, url = EXCLUDED.url""",
+                      (ticket_number, data["chat_id"], data["username"], data["message_text"],
+                       data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"], data.get("url")))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def get_grupos_estados():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT chat_id, title, activo FROM grupos_estados")
-        return {row['chat_id']: {'title': row['title'], 'activo': row['activo']} for row in c.fetchall()}
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT chat_id, title, activo FROM grupos_estados")
+            return {row['chat_id']: {'title': row['title'], 'activo': row['activo']} for row in c.fetchall()}
+    finally:
+        release_db_connection(conn)
 
 def set_grupo_estado(chat_id, title, activo=True):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("""INSERT INTO grupos_estados (chat_id, title, activo) 
-                     VALUES (%s, %s, %s) 
-                     ON CONFLICT (chat_id) DO UPDATE SET title = EXCLUDED.title, activo = EXCLUDED.activo""",
-                  (chat_id, title, activo))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("""INSERT INTO grupos_estados (chat_id, title, activo) 
+                         VALUES (%s, %s, %s) 
+                         ON CONFLICT (chat_id) DO UPDATE SET title = EXCLUDED.title, activo = EXCLUDED.activo""",
+                      (chat_id, title, activo))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def get_peticiones_incorrectas(user_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT timestamp, chat_id FROM peticiones_incorrectas WHERE user_id = %s", (user_id,))
-        return [dict(row) for row in c.fetchall()]
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT timestamp, chat_id FROM peticiones_incorrectas WHERE user_id = %s", (user_id,))
+            return [dict(row) for row in c.fetchall()]
+    finally:
+        release_db_connection(conn)
 
 def add_peticion_incorrecta(user_id, timestamp, chat_id):
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO peticiones_incorrectas (user_id, timestamp, chat_id) VALUES (%s, %s, %s)",
-                  (user_id, timestamp, chat_id))
-        conn.commit()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("INSERT INTO peticiones_incorrectas (user_id, timestamp, chat_id) VALUES (%s, %s, %s)",
+                      (user_id, timestamp, chat_id))
+            conn.commit()
+    finally:
+        release_db_connection(conn)
 
 def clean_database():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM peticiones_registradas WHERE ticket_number IN (SELECT ticket_number FROM historial_solicitudes WHERE estado = 'eliminado')")
-        c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s", (datetime.now(SPAIN_TZ) - timedelta(days=30),))
-        conn.commit()
-    logger.info("Base de datos limpiada de registros obsoletos.")
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("DELETE FROM peticiones_registradas WHERE ticket_number IN (SELECT ticket_number FROM historial_solicitudes WHERE estado = 'eliminado')")
+            c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s", (datetime.now(SPAIN_TZ) - timedelta(days=30),))
+            conn.commit()
+        logger.info("Base de datos limpiada de registros obsoletos.")
+    finally:
+        release_db_connection(conn)
 
-# Nueva función para obtener estadísticas avanzadas
 def get_advanced_stats():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM peticiones_registradas")
-        pendientes = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM historial_solicitudes")
-        gestionadas = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM usuarios")
-        usuarios = c.fetchone()[0]
-        return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT COUNT(*) FROM peticiones_registradas")
+            pendientes = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM historial_solicitudes")
+            gestionadas = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM usuarios")
+            usuarios = c.fetchone()[0]
+            return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
+    finally:
+        release_db_connection(conn)
 
 # Configuraciones estáticas
-admin_ids = set([12345678])  # Añade los IDs de los administradores reales
+admin_ids = set([12345678])
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
     -1001886336551: "Biblioteca Privada EntresHijos",
@@ -288,7 +336,34 @@ def update_grupos_estados(chat_id, title=None):
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
-# Función para manejar mensajes
+# Limpieza automática
+def auto_clean_database():
+    while True:
+        clean_database()
+        time.sleep(86400)  # Cada 24 horas
+
+def clean_globals():
+    while True:
+        now = datetime.now(SPAIN_TZ)
+        for key in list(menu_activos.keys()):
+            if (now - menu_activos[key]).total_seconds() > 3600:
+                del menu_activos[key]
+        for chat_id in list(grupos_seleccionados.keys()):
+            if grupos_seleccionados[chat_id].get("estado") == "seleccion" and \
+               (now - menu_activos.get((chat_id, grupos_seleccionados[chat_id]["mensaje_id"]), now)).total_seconds() > 3600:
+                del grupos_seleccionados[chat_id]
+        time.sleep(3600)
+
+# Recordatorio diario
+def daily_reminder():
+    while True:
+        stats = get_advanced_stats()
+        if stats["pendientes"] > 0:
+            safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO,
+                            text=f"⏰ *Recordatorio diario* 🌟\nHay {stats['pendientes']} solicitudes pendientes.", parse_mode='Markdown')
+        time.sleep(86400)
+
+# Handlers
 def handle_message(update, context):
     if not update.message:
         return
@@ -320,13 +395,11 @@ def handle_message(update, context):
             warn_message = f"/warn {username_escaped} (Petición fuera del canal correspondiente)"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-            logger.info(f"Solicitud de {username} denegada: fuera del canal correcto")
             return
 
         if not grupos_estados.get(chat_id, {}).get("activo", True):
             notificacion = f"🚫 {username_escaped}, las solicitudes están desactivadas en este grupo. Contacta a un administrador. 🌟"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
 
         user_data = get_peticiones_por_usuario(user_id)
@@ -338,7 +411,6 @@ def handle_message(update, context):
             warn_message = f"/warn {username_escaped} (Límite de peticiones diarias superado)"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-            logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
 
         ticket_number = increment_ticket_counter()
@@ -362,7 +434,6 @@ def handle_message(update, context):
                 "chat_title": chat_title,
                 "thread_id": thread_id
             })
-            logger.info(f"Solicitud #{ticket_number} registrada en la base de datos")
 
         user_data["count"] += 1
         set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
@@ -391,7 +462,6 @@ def handle_message(update, context):
             "⏳ Será atendida pronto. 🙌"
         )
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=confirmacion_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        logger.info(f"Confirmación enviada a {username} en chat {canal_info['chat_id']}")
 
     elif any(word in message_text.lower() for word in ['solicito', 'solícito', 'peticion', 'petición']) and chat_id in CANALES_PETICIONES:
         add_peticion_incorrecta(user_id, timestamp, chat_id)
@@ -406,9 +476,7 @@ def handle_message(update, context):
 
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion_incorrecta, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-        logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
-# Handlers de comandos
 def handle_menu(update, context):
     if not update.message:
         return
@@ -425,7 +493,7 @@ def handle_menu(update, context):
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-        [InlineKeyboardButton("🧹 Limpi Ir", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+        [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
         [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -534,10 +602,13 @@ def handle_graficas(update, context):
     if str(chat_id) != GROUP_DESTINO:
         safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
         return
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
-        stats = dict(c.fetchall())
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+            stats = dict(c.fetchall())
+    finally:
+        release_db_connection(conn)
 
     total = sum(stats.values())
     stats_msg = (
@@ -550,6 +621,58 @@ def handle_graficas(update, context):
     )
     safe_bot_method(bot.send_message, chat_id=chat_id, text=stats_msg, parse_mode='Markdown')
 
+def handle_buscar(update, context):
+    if not update.message:
+        return
+    message = update.message
+    chat_id = message.chat_id
+    if str(chat_id) != GROUP_DESTINO:
+        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ Este comando solo puede usarse en el grupo destino. 🌟", parse_mode='Markdown')
+        return
+    args = context.args
+    if not args:
+        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Uso: /buscar @username o texto 🌟", parse_mode='Markdown')
+        return
+    search_term = " ".join(args)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT ticket_number, username, message_text, estado FROM historial_solicitudes "
+                      "WHERE username ILIKE %s OR message_text ILIKE %s LIMIT 5",
+                      (f"%{search_term}%", f"%{search_term}%"))
+            results = c.fetchall()
+    finally:
+        release_db_connection(conn)
+    if not results:
+        safe_bot_method(bot.send_message, chat_id=chat_id, text="ℹ️ No se encontraron resultados. 🌟", parse_mode='Markdown')
+        return
+    response = "\n".join([f"🎫 #{t} - {escape_markdown(u, True)}: {escape_markdown(m)} ({e})" for t, u, m, e in results])
+    safe_bot_method(bot.send_message, chat_id=chat_id, text=f"🔍 *Resultados* 🌟\n{response}", parse_mode='Markdown')
+
+def handle_mystats(update, context):
+    if not update.message:
+        return
+    message = update.message
+    user_id = message.from_user.id
+    username = f"@{message.from_user.username}" if message.from_user.username else "Usuario"
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT COUNT(*) FROM peticiones_registradas WHERE username = %s", (username,))
+            pendientes = c.fetchone()[0]
+            c.execute("SELECT estado, COUNT(*) FROM historial_solicitudes WHERE username = %s GROUP BY estado", (username,))
+            historial = dict(c.fetchall())
+    finally:
+        release_db_connection(conn)
+    stats_msg = (
+        f"📊 *Tus estadísticas, {escape_markdown(username, True)}* 🌟\n"
+        f"📋 Pendientes: {pendientes}\n"
+        f"✅ Subidas: {historial.get('subido', 0)}\n"
+        f"❌ Denegadas: {historial.get('denegado', 0)}\n"
+        f"🗑️ Eliminadas: {historial.get('eliminado', 0)}"
+    )
+    safe_bot_method(bot.send_message, chat_id=message.chat_id, text=stats_msg, parse_mode='Markdown')
+
 # Manejador de botones
 def button_handler(update, context):
     query = update.callback_query
@@ -559,7 +682,6 @@ def button_handler(update, context):
     data = query.data
     chat_id = query.message.chat_id
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
-    logger.debug(f"Botón presionado: {data}")
 
     if data == "menu_principal":
         keyboard = [
@@ -583,10 +705,13 @@ def button_handler(update, context):
         return
 
     if data == "menu_pendientes":
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-            pendientes = c.fetchall()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY priority DESC, ticket_number")
+                pendientes = c.fetchall()
+        finally:
+            release_db_connection(conn)
         if not pendientes:
             safe_bot_method(bot.send_message, chat_id=chat_id, text="ℹ️ No hay solicitudes pendientes. 🌟", parse_mode='Markdown')
             safe_bot_method(query.message.delete)
@@ -617,11 +742,14 @@ def button_handler(update, context):
         return
 
     if data == "menu_historial":
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT ticket_number, username, message_text, chat_title, estado, fecha_gestion, admin_username "
-                      "FROM historial_solicitudes ORDER BY ticket_number DESC LIMIT 5")
-            solicitudes = c.fetchall()
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT ticket_number, username, message_text, chat_title, estado, fecha_gestion, admin_username "
+                          "FROM historial_solicitudes ORDER BY ticket_number DESC LIMIT 5")
+                solicitudes = c.fetchall()
+        finally:
+            release_db_connection(conn)
         if not solicitudes:
             safe_bot_method(bot.send_message, chat_id=chat_id, text="ℹ️ No hay solicitudes gestionadas en el historial. 🌟", parse_mode='Markdown')
             safe_bot_method(query.message.delete)
@@ -653,10 +781,13 @@ def button_handler(update, context):
         return
 
     if data == "menu_graficas":
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
-            stats = dict(c.fetchall())
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+                stats = dict(c.fetchall())
+        finally:
+            release_db_connection(conn)
 
         total = sum(stats.values())
         stats_msg = (
@@ -808,10 +939,13 @@ def button_handler(update, context):
     if data.startswith("pend_"):
         if data.startswith("pend_page_"):
             page = int(data.split("_")[2])
-            with get_db_connection() as conn:
-                c = conn.cursor()
-                c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY ticket_number")
-                pendientes = c.fetchall()
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as c:
+                    c.execute("SELECT ticket_number, username, chat_title FROM peticiones_registradas ORDER BY priority DESC, ticket_number")
+                    pendientes = c.fetchall()
+            finally:
+                release_db_connection(conn)
             ITEMS_PER_PAGE = 5
             total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
             if page < 1 or page > total_pages:
@@ -847,6 +981,7 @@ def button_handler(update, context):
                 [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
                 [InlineKeyboardButton("❌ Denegado", callback_data=f"pend_{ticket}_denegado")],
                 [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"pend_{ticket}_eliminar")],
+                [InlineKeyboardButton("⏫ Priorizar", callback_data=f"pend_{ticket}_priority")],
                 [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -861,18 +996,40 @@ def button_handler(update, context):
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if len(data.split("_")) == 3:  # Mostrar confirmación
+        if data.endswith("_priority"):  # Priorizar solicitud
+            conn = get_db_connection()
+            try:
+                with conn.cursor() as c:
+                    c.execute("UPDATE peticiones_registradas SET priority = priority + 1 WHERE ticket_number = %s", (ticket,))
+                    conn.commit()
+            finally:
+                release_db_connection(conn)
+            safe_bot_method(query.edit_message_text, text=f"✅ Ticket #{ticket} priorizado.", parse_mode='Markdown')
+            return
+
+        if len(data.split("_")) == 3 and data.split("_")[2] in ["subido", "denegado", "eliminar"]:  # Mostrar confirmación
             accion = data.split("_")[2]
-            if accion in ["subido", "denegado", "eliminar"]:
-                accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+            accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+            if accion == "subido":
+                keyboard = [
+                    [InlineKeyboardButton("✅ Con URL", callback_data=f"pend_{ticket}_subido_url"),
+                     InlineKeyboardButton("✅ Sin URL", callback_data=f"pend_{ticket}_subido_confirm")],
+                    [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")]
+                ]
+            else:
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
                     [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")]
                 ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}? 🔍\n(Tiempo: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
-                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                return
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            texto = f"📋 *Confirmar acción* 🌟\n¿Marcar el Ticket #{ticket} como {accion_str}? 🔍\n(Tiempo: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            return
+
+        if data.endswith("_subido_url"):  # Solicitar URL
+            context.user_data['pending_ticket'] = ticket
+            safe_bot_method(query.edit_message_text, text=f"📎 *Proporciona la URL* 🌟\nEnvía el enlace del mensaje o archivo subido para el Ticket #{ticket}.", parse_mode='Markdown')
+            return
 
         if data.endswith("_confirm"):  # Procesar confirmación
             accion = data.split("_")[2]
@@ -884,7 +1041,8 @@ def button_handler(update, context):
                 "chat_title": info["chat_title"],
                 "estado": accion,
                 "fecha_gestion": datetime.now(SPAIN_TZ),
-                "admin_username": admin_username
+                "admin_username": admin_username,
+                "url": None  # Sin URL por defecto
             })
             keyboard = [
                 [InlineKeyboardButton("✅ Sí", callback_data=f"pend_{ticket}_{accion}_notify_yes"),
@@ -902,12 +1060,17 @@ def button_handler(update, context):
             username_escaped = escape_markdown(info["username"], True)
             message_text_escaped = escape_markdown(info["message_text"])
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+            historial = get_historial_solicitud(ticket)
+            url = historial.get("url")
             if notify:
                 canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
                 if accion == "subido":
-                    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida por el *Equipo de administración EntresHijos*. 🎉", 
-                                   parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+                    msg = (
+                        f"✅ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido subida por el *Equipo de administración EntresHijos*. 🎉"
+                    )
+                    if url:
+                        msg += f"\n📎 Enlace: {url}"
+                    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=msg, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "denegado":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
                                    text=f"❌ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ha sido denegada por el *Equipo de administración EntresHijos*. 🌟", 
@@ -931,6 +1094,36 @@ def button_handler(update, context):
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
+def handle_url_input(update, context):
+    if 'pending_ticket' not in context.user_data:
+        return
+    ticket = context.user_data['pending_ticket']
+    url = update.message.text.strip()
+    info = get_peticion_registrada(ticket)
+    if not info:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❌ Ticket #{ticket} no encontrado. 🌟", parse_mode='Markdown')
+        return
+
+    set_historial_solicitud(ticket, {
+        "chat_id": info["chat_id"],
+        "username": info["username"],
+        "message_text": info["message_text"],
+        "chat_title": info["chat_title"],
+        "estado": "subido",
+        "fecha_gestion": datetime.now(SPAIN_TZ),
+        "admin_username": f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @",
+        "url": url
+    })
+    keyboard = [
+        [InlineKeyboardButton("✅ Sí", callback_data=f"pend_{ticket}_subido_notify_yes"),
+         InlineKeyboardButton("❌ No", callback_data=f"pend_{ticket}_subido_notify_no")],
+        [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    texto = f"✅ *Ticket #{ticket} procesado como Subido con URL.* 🌟\n¿Notificar al usuario? (Confirmado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+    del context.user_data['pending_ticket']
+
 # Añadir handlers
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
@@ -939,7 +1132,10 @@ dispatcher.add_handler(CommandHandler('restar', handle_restar_command))
 dispatcher.add_handler(CommandHandler('ping', handle_ping))
 dispatcher.add_handler(CommandHandler('ayuda', handle_ayuda))
 dispatcher.add_handler(CommandHandler('graficas', handle_graficas))
+dispatcher.add_handler(CommandHandler('buscar', handle_buscar))
+dispatcher.add_handler(CommandHandler('mystats', handle_mystats))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
+dispatcher.add_handler(MessageHandler(Filters.text & Filters.reply & Filters.chat(int(GROUP_DESTINO)), handle_url_input))
 
 # Rutas Flask
 @app.route('/webhook', methods=['POST'])
@@ -948,7 +1144,7 @@ def webhook():
         update_json = request.get_json(force=True)
         if not update_json:
             logger.error("No se recibió JSON válido")
-            return 'ok', 200  # Siempre 200 para evitar reintentos de Telegram
+            return 'ok', 200
         update = telegram.Update.de_json(update_json, bot)
         if not update:
             logger.error("No se pudo deserializar la actualización")
@@ -963,11 +1159,14 @@ def webhook():
 def health_check():
     return "Bot de Entreshijos está activo! 🌟", 200
 
-# Inicializar la base de datos y configurar webhook al arrancar
+# Inicialización
 if __name__ == '__main__':
     init_db()
     for chat_id, title in GRUPOS_PREDEFINIDOS.items():
         set_grupo_estado(chat_id, title)
     safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
     logger.info(f"Webhook configurado en: {WEBHOOK_URL}")
+    threading.Thread(target=auto_clean_database, daemon=True).start()
+    threading.Thread(target=clean_globals, daemon=True).start()
+    threading.Thread(target=daily_reminder, daemon=True).start()
     app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
