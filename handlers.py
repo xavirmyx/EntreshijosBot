@@ -1,5 +1,6 @@
 # handlers.py
 import logging
+import pytz  # Añadimos la importación de pytz
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import MessageHandler, CommandHandler, Filters, CallbackQueryHandler, ConversationHandler
 from datetime import datetime, timedelta
@@ -119,7 +120,9 @@ def handle_message(update, context):
             f"🎫 *Ticket:* #{ticket_number}\n"
             f"📊 *Petición:* {user_data['count']}/2\n"
             f"📝 *Mensaje:* {message_text_escaped}\n"
-            f"🏠 *Grupo:* {chat_title_escaped}\n"
+            f"🏠 *Grupo:* {chat_title_.
+
+escaped}\n"
             f"🕒 *Fecha:* {timestamp_str}\n"
             "🌟 *Bot de Entreshijos*"
         )
@@ -502,7 +505,7 @@ def button_handler(update, context):
                 f"❌ *Solicitud rechazada* 🌟\n"
                 f"Hola {escape_markdown(peticion['username'], preserve_username=True)}, tu solicitud (Ticket #{ticket_number}) ha sido rechazada.\n"
                 f"📝 *Mensaje:* {escape_markdown(peticion['message_text'])}\n"
-                f"🏠 *Grupo:* {escape_markdown(peticion['chat_title'])}\n"
+                f"🏠 *Grupo:* {escape_markdown(peticion['chair_title'])}\n"
                 f"🕒 *Fecha:* {get_spain_time()}\n"
                 f"📌 Contacta a un administrador para más detalles."
             )
