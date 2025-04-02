@@ -425,7 +425,7 @@ def handle_menu(update, context):
         [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
         [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-        [InlineKeyboardButton("🧹 Limpi Ir", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+        [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
         [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -652,15 +652,6 @@ def button_handler(update, context):
         safe_bot_method(query.message.delete)
         return
 
-    if data == "menu_prioritize":
-        text = "📉 *Priorizar solicitud* 🌟\nEsta función está en desarrollo."
-        keyboard = [
-            [InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        safe_bot_method(context.bot.edit_message_text, chat_id=chat_id, message_id=message_id, text=text, reply_markup=reply_markup, parse_mode='Markdown')
-        return
-        
     if data == "menu_graficas":
         with get_db_connection() as conn:
             c = conn.cursor()
@@ -770,6 +761,15 @@ def button_handler(update, context):
         reply_markup = InlineKeyboardMarkup(keyboard)
         safe_bot_method(bot.send_message, chat_id=chat_id, text=stats_msg, reply_markup=reply_markup, parse_mode='Markdown')
         safe_bot_method(query.message.delete)
+        return
+
+    if data == "menu_prioritize":
+        text = "📉 *Priorizar solicitud* 🌟\nEsta función está en desarrollo."
+        keyboard = [
+            [InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        safe_bot_method(query.edit_message_text, text=text, reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data.startswith("select_") or data.startswith("confirm_"):
