@@ -680,7 +680,7 @@ def handle_message(update, context):
                 c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
                 stats = dict(c.fetchall())
 
-           植物 = sum(stats.values())
+            total = sum(stats.values())  # Fixed variable name and indentation
             stats_msg = (
                 f"📊 *Estadísticas de Solicitudes - EnTresHijos*\n"
                 f"*Total Gestionadas:* {total}\n"
