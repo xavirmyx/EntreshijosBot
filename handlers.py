@@ -1,6 +1,7 @@
 # handlers.py
 import logging
-import pytz  # Añadimos la importación de pytz
+import pytz
+import time  # Añadimos esta importación que se usa en safe_bot_method
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import MessageHandler, CommandHandler, Filters, CallbackQueryHandler, ConversationHandler
 from datetime import datetime, timedelta
@@ -8,7 +9,8 @@ from database import (get_peticiones_por_usuario, set_peticiones_por_usuario, ge
                      get_peticion_registrada, set_peticion_registrada, del_peticion_registrada,
                      get_historial_solicitud, set_historial_solicitud, get_grupos_estados,
                      set_grupo_estado, get_peticiones_incorrectas, add_peticion_incorrecta,
-                     clean_database, get_advanced_stats, increment_ticket_counter)
+                     clean_database, get_advanced_stats, increment_ticket_counter,
+                     get_db_connection, release_db_connection)
 from utils import escape_markdown, update_grupos_estados, get_spain_time, menu_activos, grupos_seleccionados
 from config import (GROUP_DESTINO, CANALES_PETICIONES, VALID_REQUEST_COMMANDS, frases_agradecimiento,
                     ping_respuestas, admin_ids)
@@ -120,9 +122,7 @@ def handle_message(update, context):
             f"🎫 *Ticket:* #{ticket_number}\n"
             f"📊 *Petición:* {user_data['count']}/2\n"
             f"📝 *Mensaje:* {message_text_escaped}\n"
-            f"🏠 *Grupo:* {chat_title_.
-
-escaped}\n"
+            f"🏠 *Grupo:* {chat_title_escaped}\n"  # Línea corregida
             f"🕒 *Fecha:* {timestamp_str}\n"
             "🌟 *Bot de Entreshijos*"
         )
@@ -505,7 +505,7 @@ def button_handler(update, context):
                 f"❌ *Solicitud rechazada* 🌟\n"
                 f"Hola {escape_markdown(peticion['username'], preserve_username=True)}, tu solicitud (Ticket #{ticket_number}) ha sido rechazada.\n"
                 f"📝 *Mensaje:* {escape_markdown(peticion['message_text'])}\n"
-                f"🏠 *Grupo:* {escape_markdown(peticion['chair_title'])}\n"
+                f"🏠 *Grupo:* {escape_markdown(peticion['chat_title'])}\n"  # Corregimos 'chair_title' a 'chat_title'
                 f"🕒 *Fecha:* {get_spain_time()}\n"
                 f"📌 Contacta a un administrador para más detalles."
             )
