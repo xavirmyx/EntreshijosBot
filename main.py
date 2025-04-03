@@ -17,11 +17,18 @@ TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 DATABASE_URL = os.getenv('DATABASE_URL')
-ADMIN_PERSONAL_ID = int(os.getenv('ADMIN_PERSONAL_ID'))  # Ahora se toma de variable de entorno
+
+# Obtener y validar ADMIN_PERSONAL_ID
+admin_personal_id_raw = os.getenv('ADMIN_PERSONAL_ID')
+if not admin_personal_id_raw:
+    raise ValueError("La variable de entorno 'ADMIN_PERSONAL_ID' no está configurada. Por favor, configúrala en Render con el ID del administrador.")
+try:
+    ADMIN_PERSONAL_ID = int(admin_personal_id_raw)
+except ValueError:
+    raise ValueError(f"'ADMIN_PERSONAL_ID' debe ser un número entero válido, se recibió: {admin_personal_id_raw}")
+
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
-if not ADMIN_PERSONAL_ID:
-    raise ValueError("ADMIN_PERSONAL_ID no está configurado en las variables de entorno.")
 
 # Configuración de logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -438,7 +445,7 @@ def handle_menu(update, context):
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
         [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
         [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
-        [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],  # Botón añadido
+        [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],
         [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -621,7 +628,7 @@ def button_handler(update, context):
             [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
             [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
             [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
-            [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],  # Botón añadido
+            [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],
             [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1087,5 +1094,3 @@ if __name__ == '__main__':
     for chat_id, title in GRUPOS_PREDEFINIDOS.items():
         set_grupo_estado(chat_id, title)
     safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
-    logger.info(f"Webhook configurado en: {WEBHOOK_URL}")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
