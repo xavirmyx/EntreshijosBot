@@ -10,7 +10,7 @@ from psycopg2.pool import SimpleConnectionPool
 import psycopg2.extras
 import asyncio
 
-# Configuración inicial
+# **Configuración inicial**
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
@@ -19,17 +19,17 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada.")
 
-# Logging
+# **Logging**
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Zona horaria
+# **Zona horaria**
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
-# Pool de conexiones a la base de datos
+# **Pool de conexiones a la base de datos**
 db_pool = SimpleConnectionPool(1, 10, dsn=DATABASE_URL, cursor_factory=psycopg2.extras.DictCursor)
 
-# Cache en memoria
+# **Cache en memoria**
 grupos_estados_cache = {}
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
@@ -64,7 +64,7 @@ ping_respuestas = [
     "🚀 ¡Pong! Despegando con todo el power. ✨"
 ]
 
-# Funciones de utilidad
+# **Funciones de utilidad**
 def escape_markdown(text, preserve_username=False):
     if not text:
         return text
@@ -76,7 +76,7 @@ def escape_markdown(text, preserve_username=False):
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
-# Funciones de base de datos
+# **Funciones de base de datos**
 def init_db():
     conn = db_pool.getconn()
     try:
@@ -238,7 +238,7 @@ async def update_grupos_estados(chat_id, title=None):
     elif title and grupos[chat_id]["title"] == f"Grupo {chat_id}":
         await set_grupo_estado(chat_id, title)
 
-# Manejadores
+# **Manejadores**
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
     if not message or not message.text:
@@ -377,38 +377,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=chat_id, text=f"📋 *Pendientes (Página {page}/{total_pages})* 🚀\n¡Elige una solicitud!", reply_markup=reply_markup, parse_mode='Markdown')
         await query.message.delete()
 
-# Configuración de la aplicación
+# **Configuración de la aplicación**
 application = Application.builder().token(TOKEN).build()
 
-# Añadir manejadores
+# **Añadir manejadores**
 application.add_handler(MessageHandler(~filters.COMMAND, handle_message))
 application.add_handler(CommandHandler('menu', handle_menu))
 application.add_handler(CommandHandler('ping', handle_ping))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# Inicialización síncrona
+# **Inicialización síncrona**
 init_db()
 
-# Configuración del webhook y arranque
-async def startup():
+# **Configuración del webhook y arranque**
+async def main():
+    # Configurar el webhook
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook configurado en {WEBHOOK_URL}")
+
     # Configurar grupos predefinidos
     for chat_id, title in GRUPOS_PREDEFINIDOS.items():
         await set_grupo_estado(chat_id, title)
     logger.info("Grupos predefinidos configurados.")
+
     logger.info("Aplicación iniciada.")
 
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    # Ejecutar tareas de inicio
-    asyncio.run(startup())
     # Iniciar el webhook
-    application.run_webhook(
+    await application.run_webhook(
         listen='0.0.0.0',
-        port=port,
+        port=int(os.getenv('PORT', 5000)),
         url_path='webhook',
         webhook_url=WEBHOOK_URL,
         bootstrap_retries=-1,  # Reintentar indefinidamente
         drop_pending_updates=True  # Ignorar actualizaciones pendientes
     )
+
+if __name__ == '__main__':
+    asyncio.run(main())
