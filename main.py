@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 import psycopg2.extras
 import asyncio
+from telegram.ext._utils.webhookhandler import WebhookServer
 
 # **Configuración inicial**
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
@@ -402,15 +403,20 @@ async def main():
 
     logger.info("Aplicación iniciada.")
 
-    # Iniciar el webhook
-    await application.run_webhook(
+    # Iniciar el servidor webhook manualmente
+    port = int(os.getenv('PORT', 5000))
+    server = WebhookServer(
         listen='0.0.0.0',
-        port=int(os.getenv('PORT', 5000)),
+        port=port,
         url_path='webhook',
+        application=application,
         webhook_url=WEBHOOK_URL,
         bootstrap_retries=-1,  # Reintentar indefinidamente
         drop_pending_updates=True  # Ignorar actualizaciones pendientes
     )
+    await server.serve_forever()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
