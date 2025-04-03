@@ -209,7 +209,7 @@ async def get_grupos_estados():
     if not grupos_estados_cache:
         conn = db_pool.getconn()
         try:
-            with conn.cursor() as c:
+            with conn advertiser() as c:
                 c.execute("SELECT chat_id, title, activo FROM grupos_estados")
                 grupos_estados_cache.update({row['chat_id']: {'title': row['title'], 'activo': row['activo']} for row in c.fetchall()})
         finally:
@@ -386,24 +386,27 @@ application.add_handler(CommandHandler('menu', handle_menu))
 application.add_handler(CommandHandler('ping', handle_ping))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# Inicialización y ejecución
-async def main():
-    init_db()
-    for chat_id, title in GRUPOS_PREDEFINIDOS.items():
-        await set_grupo_estado(chat_id, title)
+# Inicialización síncrona
+init_db()
+
+# Configuración del webhook y arranque
+async def startup():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook configurado en {WEBHOOK_URL}")
-    port = int(os.getenv('PORT', 5000))
-    # No usamos asyncio.run aquí, dejamos que run_webhook gestione el bucle
-    await application.run_webhook(listen='0.0.0.0', port=port, webhook_url=WEBHOOK_URL)
+    # Configurar grupos predefinidos
+    for chat_id, title in GRUPOS_PREDEFINIDOS.items():
+        await set_grupo_estado(chat_id, title)
+    logger.info("Grupos predefinidos configurados.")
+    logger.info("Aplicación iniciada.")
 
 if __name__ == '__main__':
-    # Crear un bucle de eventos explícitamente y ejecutar la coroutine main
-    loop = asyncio.get_event_loop()
-    try:
-        loop.run_until_complete(main())
-        loop.run_forever()  # Mantener el bucle corriendo para manejar webhooks
-    except KeyboardInterrupt:
-        logger.info("Bot detenido manualmente.")
-    finally:
-        loop.close()
+    port = int(os.getenv('PORT', 5000))
+    application.run_webhook(
+        listen='0.0.0.0',
+        port=port,
+        url_path='webhook',
+        webhook_url=WEBHOOK_URL,
+        bootstrap_retries=-1,  # Reintentar indefinidamente
+        drop_pending_updates=True,  # Ignorar actualizaciones pendientes
+        startup=startup  # Función de inicio
+    )
