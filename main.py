@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
-import psycopg2.extras  # Importación explícita del submódulo extras
+import psycopg2.extras
 import asyncio
 
 # Configuración inicial
@@ -381,7 +381,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application = Application.builder().token(TOKEN).build()
 
 # Añadir manejadores
-application.add_handler(MessageHandler(~filters.COMMAND, handle_message))  # Filtra mensajes que no son comandos
+application.add_handler(MessageHandler(~filters.COMMAND, handle_message))
 application.add_handler(CommandHandler('menu', handle_menu))
 application.add_handler(CommandHandler('ping', handle_ping))
 application.add_handler(CallbackQueryHandler(button_handler))
@@ -394,7 +394,16 @@ async def main():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook configurado en {WEBHOOK_URL}")
     port = int(os.getenv('PORT', 5000))
+    # No usamos asyncio.run aquí, dejamos que run_webhook gestione el bucle
     await application.run_webhook(listen='0.0.0.0', port=port, webhook_url=WEBHOOK_URL)
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Crear un bucle de eventos explícitamente y ejecutar la coroutine main
+    loop = asyncio.get_event_loop()
+    try:
+        loop.run_until_complete(main())
+        loop.run_forever()  # Mantener el bucle corriendo para manejar webhooks
+    except KeyboardInterrupt:
+        logger.info("Bot detenido manualmente.")
+    finally:
+        loop.close()
