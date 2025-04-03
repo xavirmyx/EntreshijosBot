@@ -408,6 +408,23 @@ def handle_message(update, context):
         texto = f"📢 *Confirmar notificación* ✨\nMensaje: {notificacion}\n¿Deseas enviar este mensaje al usuario?"
         safe_bot_method(bot.send_message, chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
+    elif context.user_data.get("upload_state") == "waiting_for_url":
+        ticket = context.user_data.get("ticket_to_upload")
+        if not ticket or not get_peticion_registrada(ticket):
+            safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
+            return
+        url = message_text
+        context.user_data["upload_url"] = url
+        context.user_data["upload_state"] = "confirm_url"
+        keyboard = [
+            [InlineKeyboardButton("✅ Enviar", callback_data=f"upload_{ticket}_send"),
+             InlineKeyboardButton("✏️ Modificar", callback_data=f"upload_{ticket}_modify")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data=f"upload_{ticket}_cancel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        texto = f"📢 *Confirmar URL* ✨\nURL: {url}\n¿Deseas enviar esta URL al usuario?"
+        safe_bot_method(bot.send_message, chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+
 def handle_menu(update, context):
     if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
         return
@@ -856,8 +873,13 @@ def button_handler(update, context):
 
         if len(data.split("_")) == 3:
             accion = data.split("_")[2]
-            if accion in ["subido", "denegado", "eliminar"]:
-                accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
+            if accion == "subido":
+                context.user_data["ticket_to_upload"] = ticket
+                context.user_data["upload_state"] = "waiting_for_url"
+                safe_bot_method(query.edit_message_text, text="✅ *Marcar como Subido* ✨\nPor favor, envía la URL de la petición subida.", parse_mode='Markdown')
+                return
+            elif accion in ["denegado", "eliminar"]:
+                accion_str = {"denegado": "Denegado", "eliminar": "Eliminado"}[accion]
                 keyboard = [
                     [InlineKeyboardButton("✅ Confirmar", callback_data=f"pend_{ticket}_{accion}_confirm")],
                     [InlineKeyboardButton("❌ Cancelar", callback_data=f"pend_{ticket}_cancel")],
@@ -889,14 +911,21 @@ def button_handler(update, context):
                 "chat_title": info["chat_title"], "estado": accion, "fecha_gestion": datetime.now(SPAIN_TZ),
                 "admin_username": admin_username
             })
-            keyboard = [
-                [InlineKeyboardButton("✅ Sí", callback_data=f"pend_{ticket}_{accion}_notify_yes"),
-                 InlineKeyboardButton("❌ No", callback_data=f"pend_{ticket}_{accion}_notify_no")],
-                [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            texto = f"✅ *Ticket #{ticket} marcado como {accion_str}.* ✨\n¿Notificar al usuario? (Hecho: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
-            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            if accion != "subido":  # For "denegado" and "eliminar", ask to notify
+                keyboard = [
+                    [InlineKeyboardButton("✅ Sí", callback_data=f"pend_{ticket}_{accion}_notify_yes"),
+                     InlineKeyboardButton("❌ No", callback_data=f"pend_{ticket}_{accion}_notify_no")],
+                    [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                texto = f"✅ *Ticket #{ticket} marcado como {accion_str}.* ✨\n¿Notificar al usuario? (Hecho: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            else:  # For "subido", move directly to URL confirmation
+                del_peticion_registrada(ticket)
+                texto = f"✅ *Ticket #{ticket} marcado como Subido.* ✨\nURL registrada, procesada y notificada."
+                keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
         if data.endswith("_notify_yes") or data.endswith("_notify_no"):
@@ -907,11 +936,7 @@ def button_handler(update, context):
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             if notify:
                 canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
-                if accion == "subido":
-                    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"✅ ¡Buenas, {username_escaped}! Tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ya está arriba. ¡Gracias al equipo! 🎉", 
-                                   parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-                elif accion == "denegado":
+                if accion == "denegado":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
                                    text=f"❌ Hola {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" fue denegada. ¡Sigue intentándolo! 😊", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
@@ -972,6 +997,53 @@ def button_handler(update, context):
             context.user_data.pop("notify_state", None)
             context.user_data.pop("ticket_to_notify", None)
             context.user_data.pop("notify_message", None)
+            return
+
+    if data.startswith("upload_"):
+        parts = data.split("_")
+        ticket = parts[1]
+        accion = parts[2]
+        info = get_peticion_registrada(ticket)
+        if not info:
+            safe_bot_method(query.edit_message_text, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
+            return
+        if accion == "send":
+            url = context.user_data.get("upload_url")
+            if not url:
+                safe_bot_method(query.edit_message_text, text="❌ No hay URL para enviar. 😅", parse_mode='Markdown')
+                return
+            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
+            username_escaped = escape_markdown(info["username"], True)
+            message_text_escaped = escape_markdown(info["message_text"])
+            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                            text=f"✅ ¡Buenas, {username_escaped}! Tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ya está subida. Aquí tienes: {url}\n¡Gracias al equipo! 🎉", 
+                            parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+            set_historial_solicitud(ticket, {
+                "chat_id": info["chat_id"], "username": info["username"], "message_text": info["message_text"],
+                "chat_title": info["chat_title"], "estado": "subido", "fecha_gestion": datetime.now(SPAIN_TZ),
+                "admin_username": admin_username
+            })
+            del_peticion_registrada(ticket)
+            texto = f"✅ *Ticket #{ticket} marcado como Subido y notificado.* 🚀\n(Hora: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data.pop("upload_state", None)
+            context.user_data.pop("ticket_to_upload", None)
+            context.user_data.pop("upload_url", None)
+            return
+        elif accion == "modify":
+            context.user_data["upload_state"] = "waiting_for_url"
+            safe_bot_method(query.edit_message_text, text="✏️ *Modificar URL* ✨\nEnvía la nueva URL de la petición subida.", parse_mode='Markdown')
+            return
+        elif accion == "cancel":
+            texto = f"❌ *Acción cancelada para el Ticket #{ticket}.* ✨\n(Hora: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data.pop("upload_state", None)
+            context.user_data.pop("ticket_to_upload", None)
+            context.user_data.pop("upload_url", None)
             return
 
 # **Añadir handlers al dispatcher**
