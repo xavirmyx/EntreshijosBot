@@ -1094,3 +1094,6 @@ if __name__ == '__main__':
     for chat_id, title in GRUPOS_PREDEFINIDOS.items():
         set_grupo_estado(chat_id, title)
     safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+    logger.info(f"Webhook configurado en {WEBHOOK_URL}")
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
