@@ -18,15 +18,6 @@ GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-# Obtener y validar ADMIN_PERSONAL_ID
-admin_personal_id_raw = os.getenv('ADMIN_PERSONAL_ID')
-if not admin_personal_id_raw:
-    raise ValueError("La variable de entorno 'ADMIN_PERSONAL_ID' no está configurada. Por favor, configúrala en Render con el ID del administrador.")
-try:
-    ADMIN_PERSONAL_ID = int(admin_personal_id_raw)
-except ValueError:
-    raise ValueError(f"'ADMIN_PERSONAL_ID' debe ser un número entero válido, se recibió: {admin_personal_id_raw}")
-
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
 
@@ -244,7 +235,6 @@ def get_advanced_stats():
         return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
 
 # **Configuraciones estáticas**
-admin_ids = set([12345678, ADMIN_PERSONAL_ID])
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
     -1001886336551: "Biblioteca Privada EntresHijos",
@@ -310,7 +300,6 @@ def send_daily_pending_notification():
             if stats["pendientes"] > 0:
                 mensaje = f"📢 ¡Buenos días, equipo! 🌞\nHay *{stats['pendientes']} solicitudes esperando acción. ¡Vamos a por ellas! 💪"
                 safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, text=mensaje, parse_mode='Markdown')
-                safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=mensaje, parse_mode='Markdown')
             time.sleep(86400)
         time.sleep(60)
 
@@ -348,7 +337,7 @@ def handle_message(update, context):
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
             return
         user_data = get_peticiones_por_usuario(user_id) or {"count": 0, "chat_id": chat_id, "username": username}
-        if user_data["count"] >= 2 and user_id not in admin_ids:
+        if user_data["count"] >= 2:
             limite_message = f"⛔ ¡Ups, {username_escaped}! Has llegado al límite de 2 peticiones hoy. ¡Vuelve mañana! 😄"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
             return
@@ -364,7 +353,6 @@ def handle_message(update, context):
             "✨ *Bot de Entreshijos*"
         )
         sent_message = safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, text=destino_message, parse_mode='Markdown')
-        safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=destino_message, parse_mode='Markdown')
         if sent_message:
             set_peticion_registrada(ticket_number, {
                 "chat_id": chat_id, "username": username, "message_text": message_text,
@@ -384,7 +372,6 @@ def handle_message(update, context):
                 "✨ *Bot de Entreshijos*"
             )
             safe_bot_method(bot.edit_message_text, chat_id=GROUP_DESTINO, message_id=sent_message.message_id, text=destino_message, parse_mode='Markdown')
-            safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=destino_message, parse_mode='Markdown')
             confirmacion_message = (
                 f"🎉 *¡Solicitud en marcha!* 🚀\n"
                 f"Hola {username_escaped}, tu pedido (Ticket #{ticket_number}) está en el sistema.\n"
@@ -398,7 +385,7 @@ def handle_message(update, context):
         notificacion_incorrecta = f"🤔 ¿Querías decir /solicito, {username_escaped}? Usa */solicito [tu pedido]* para que funcione. 😊"
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion_incorrecta, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
 
-    elif context.user_data.get("notify_state") == "waiting_for_message":
+    elif context.user_data.get("notify_state") == "waiting_for_message" and str(chat_id) == GROUP_DESTINO:
         ticket = context.user_data.get("ticket_to_notify")
         if not ticket or not get_peticion_registrada(ticket):
             safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
@@ -415,7 +402,7 @@ def handle_message(update, context):
         texto = f"📢 *Confirmar notificación* ✨\nMensaje: {notificacion}\n¿Deseas enviar este mensaje al usuario?"
         safe_bot_method(bot.send_message, chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
-    elif context.user_data.get("upload_state") == "waiting_for_url":
+    elif context.user_data.get("upload_state") == "waiting_for_url" and str(chat_id) == GROUP_DESTINO:
         ticket = context.user_data.get("ticket_to_upload")
         if not ticket or not get_peticion_registrada(ticket):
             safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
@@ -433,7 +420,7 @@ def handle_message(update, context):
         safe_bot_method(bot.send_message, chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
 def handle_menu(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     admin_username = f"@{update.message.from_user.username}" if update.message.from_user.username else "Admin sin @"
     keyboard = [
@@ -454,7 +441,7 @@ def handle_menu(update, context):
         menu_activos[(update.message.chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
 
 def handle_sumar_command(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     args = context.args
     if len(args) < 2:
@@ -474,7 +461,7 @@ def handle_sumar_command(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ ¡Añadimos {amount} a {target_username}! Total: {new_count}/2 ✨", parse_mode='Markdown')
 
 def handle_restar_command(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     args = context.args
     if len(args) < 2:
@@ -497,7 +484,7 @@ def handle_restar_command(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ ¡Quitamos {amount} a {username}! Total: {new_count}/2 ✨", parse_mode='Markdown')
 
 def handle_ping(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
 
@@ -520,7 +507,7 @@ def handle_ayuda(update, context):
                     message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
 
 def handle_graficas(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -538,7 +525,7 @@ def handle_graficas(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=stats_msg, parse_mode='Markdown')
 
 def handle_broadcast(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     args = context.args
     if not args:
@@ -550,7 +537,7 @@ def handle_broadcast(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="✅ ¡Mensaje enviado a todos los grupos! 🚀", parse_mode='Markdown')
 
 def handle_priorizar(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     args = context.args
     if not args or not args[0].isdigit():
@@ -566,7 +553,7 @@ def handle_priorizar(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"{'⭐' if new_prioridad else '🌟'} *Ticket #{ticket_number} {'priorizado' if new_prioridad else 'sin prioridad'}* ✨", parse_mode='Markdown')
 
 def handle_notificar(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     args = context.args
     if len(args) < 2:
@@ -588,7 +575,7 @@ def handle_notificar(update, context):
     safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ Notificación enviada al usuario del Ticket #{ticket_number}. 🚀", parse_mode='Markdown')
 
 def handle_topusuarios(update, context):
-    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+    if not update.message or str(update.message.chat_id) != GROUP_DESTINO:
         return
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -617,6 +604,9 @@ def button_handler(update, context):
     data = query.data
     chat_id = query.message.chat_id
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
+
+    if str(chat_id) != GROUP_DESTINO:
+        return
 
     if data == "menu_principal":
         keyboard = [
