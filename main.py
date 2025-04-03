@@ -209,7 +209,7 @@ async def get_grupos_estados():
     if not grupos_estados_cache:
         conn = db_pool.getconn()
         try:
-            with conn advertiser() as c:
+                with conn.cursor() as c:
                 c.execute("SELECT chat_id, title, activo FROM grupos_estados")
                 grupos_estados_cache.update({row['chat_id']: {'title': row['title'], 'activo': row['activo']} for row in c.fetchall()})
         finally:
