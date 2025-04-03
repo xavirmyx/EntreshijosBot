@@ -401,12 +401,14 @@ async def startup():
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
+    # Ejecutar tareas de inicio
+    asyncio.run(startup())
+    # Iniciar el webhook
     application.run_webhook(
         listen='0.0.0.0',
         port=port,
         url_path='webhook',
         webhook_url=WEBHOOK_URL,
         bootstrap_retries=-1,  # Reintentar indefinidamente
-        drop_pending_updates=True,  # Ignorar actualizaciones pendientes
-        startup=startup  # Función de inicio
+        drop_pending_updates=True  # Ignorar actualizaciones pendientes
     )
