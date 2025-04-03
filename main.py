@@ -4,7 +4,7 @@ import random
 import pytz
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, Filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 import asyncio
@@ -228,15 +228,24 @@ async def set_grupo_estado(chat_id, title, activo=True):
     finally:
         db_pool.putconn(conn)
 
+async def update_grupos_estados(chat_id, title=None):
+    if chat_id > 0 or str(chat_id) == GROUP_DESTINO:
+        return
+    grupos = await get_grupos_estados()
+    if chat_id not in grupos:
+        await set_grupo_estado(chat_id, title if title else f"Grupo {chat_id}")
+    elif title and grupos[chat_id]["title"] == f"Grupo {chat_id}":
+        await set_grupo_estado(chat_id, title)
+
 # Manejadores
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
-    if not message:
+    if not message or not message.text:
         return
     chat_id = message.chat_id
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else "Usuario sin @"
-    message_text = message.text or ''
+    message_text = message.text
     chat_title = message.chat.title or 'Chat privado'
     thread_id = message.message_thread_id
     canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
@@ -371,7 +380,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application = Application.builder().token(TOKEN).build()
 
 # Añadir manejadores
-application.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+application.add_handler(MessageHandler(~telegram.ext.filters.COMMAND, handle_message))  # Filtra mensajes que no son comandos
 application.add_handler(CommandHandler('menu', handle_menu))
 application.add_handler(CommandHandler('ping', handle_ping))
 application.add_handler(CallbackQueryHandler(button_handler))
