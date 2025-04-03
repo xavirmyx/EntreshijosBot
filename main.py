@@ -17,11 +17,11 @@ TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
 DATABASE_URL = os.getenv('DATABASE_URL')
+ADMIN_PERSONAL_ID = int(os.getenv('ADMIN_PERSONAL_ID'))  # Ahora se toma de variable de entorno
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
-
-# ID del administrador personal
-ADMIN_PERSONAL_ID = 7767930852
+if not ADMIN_PERSONAL_ID:
+    raise ValueError("ADMIN_PERSONAL_ID no está configurado en las variables de entorno.")
 
 # Configuración de logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -438,6 +438,7 @@ def handle_menu(update, context):
         [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
         [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
         [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
+        [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],  # Botón añadido
         [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -620,6 +621,7 @@ def button_handler(update, context):
             [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
             [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
             [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
+            [InlineKeyboardButton("📢 Mensaje Global", callback_data="menu_broadcast")],  # Botón añadido
             [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -630,6 +632,11 @@ def button_handler(update, context):
         safe_bot_method(query.message.delete)
         if (chat_id, query.message.message_id) in menu_activos:
             del menu_activos[(chat_id, query.message.message_id)]
+        return
+
+    if data == "menu_broadcast":
+        safe_bot_method(bot.send_message, chat_id=chat_id, text="📢 *¡Mensaje Global!* ✨\nEscribe: /broadcast [mensaje]", parse_mode='Markdown')
+        safe_bot_method(query.message.delete)
         return
 
     if data == "menu_pendientes":
