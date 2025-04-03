@@ -4,7 +4,7 @@ import random
 import pytz
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 import psycopg2.extras  # Importación explícita del submódulo extras
@@ -381,7 +381,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application = Application.builder().token(TOKEN).build()
 
 # Añadir manejadores
-application.add_handler(MessageHandler(~telegram.ext.filters.COMMAND, handle_message))  # Filtra mensajes que no son comandos
+application.add_handler(MessageHandler(~filters.COMMAND, handle_message))  # Filtra mensajes que no son comandos
 application.add_handler(CommandHandler('menu', handle_menu))
 application.add_handler(CommandHandler('ping', handle_ping))
 application.add_handler(CallbackQueryHandler(button_handler))
