@@ -7,6 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
+import psycopg2.extras  # Importación explícita del submódulo extras
 import asyncio
 
 # Configuración inicial
