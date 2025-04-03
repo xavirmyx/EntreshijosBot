@@ -12,7 +12,7 @@ from psycopg2.extras import DictCursor
 import threading
 import time
 
-# Configura tu token, grupo y URL del webhook usando variables de entorno
+# Configuración inicial usando variables de entorno
 TOKEN = os.getenv('TOKEN', '7629869990:AAGxdlWLX6n7i844QgxNFhTygSCo4S8ZqkY')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO', '-1002641818457')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL', 'https://entreshijosbot.onrender.com/webhook')
@@ -20,18 +20,16 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
 
-# ID del administrador personal (tú)
+# ID del administrador personal
 ADMIN_PERSONAL_ID = 7767930852
 
-# Configura el logging
+# Configuración de logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Inicializa el bot y Flask
-bot = telegram.Bot(token=TOKEN)
+# Inicialización de Flask y Telegram Bot
 app = Flask(__name__)
-
-# Configura el Dispatcher
+bot = telegram.Bot(token=TOKEN)
 dispatcher = Dispatcher(bot, None, workers=0)
 SPAIN_TZ = pytz.timezone('Europe/Madrid')
 
@@ -44,13 +42,13 @@ def safe_bot_method(method, *args, **kwargs):
     try:
         return method(*args, **kwargs)
     except telegram.error.Unauthorized:
-        logger.warning(f"Bot no autorizado para realizar la acción en {kwargs.get('chat_id', 'desconocido')}")
+        logger.warning(f"Bot no autorizado para {kwargs.get('chat_id', 'desconocido')}")
         return None
     except telegram.error.TelegramError as e:
         logger.error(f"Error de Telegram: {str(e)}")
         return None
 
-# Inicialización de la base de datos PostgreSQL
+# **Inicialización y manejo de la base de datos**
 def init_db():
     conn = None
     try:
@@ -62,7 +60,6 @@ def init_db():
                      (ticket_number BIGINT PRIMARY KEY, chat_id BIGINT, username TEXT, message_text TEXT, 
                       message_id BIGINT, timestamp TIMESTAMP WITH TIME ZONE, chat_title TEXT, thread_id BIGINT, 
                       prioridad BOOLEAN DEFAULT FALSE)''')
-        # Migración para añadir la columna 'etiquetas' si no existe
         c.execute('''DO $$ 
                      BEGIN 
                          IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
@@ -80,7 +77,7 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS usuarios 
                      (user_id BIGINT PRIMARY KEY, username TEXT)''')
         conn.commit()
-        logger.info("Base de datos inicializada y migrada correctamente.")
+        logger.info("Base de datos inicializada.")
     except Exception as e:
         logger.error(f"Error al inicializar la base de datos: {str(e)}")
         raise
@@ -89,13 +86,9 @@ def init_db():
             conn.close()
 
 def get_db_connection():
-    try:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor, connect_timeout=10)
-    except psycopg2.OperationalError as e:
-        logger.error(f"Error al conectar a la base de datos: {str(e)}")
-        raise
+    return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor, connect_timeout=10)
 
-# Funciones de utilidad para la base de datos
+# **Funciones de utilidad para la base de datos**
 def get_ticket_counter():
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -131,8 +124,8 @@ def set_peticiones_por_usuario(user_id, count, chat_id, username, last_reset=Non
         c = conn.cursor()
         c.execute("""INSERT INTO peticiones_por_usuario (user_id, count, chat_id, username, last_reset) 
                      VALUES (%s, %s, %s, %s, %s)
-                     ON CONFLICT (user_id) DO UPDATE SET 
-                     count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
+                     ON CONFLICT (user_id) DO UPDATE SET count = EXCLUDED.count, chat_id = EXCLUDED.chat_id, 
+                     username = EXCLUDED.username, last_reset = EXCLUDED.last_reset""",
                   (user_id, count, chat_id, username, last_reset))
         c.execute("""INSERT INTO usuarios (user_id, username) 
                      VALUES (%s, %s) 
@@ -161,10 +154,9 @@ def set_peticion_registrada(ticket_number, data):
         c.execute("""INSERT INTO peticiones_registradas 
                      (ticket_number, chat_id, username, message_text, message_id, timestamp, chat_title, thread_id, prioridad) 
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
-                     message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, chat_title = EXCLUDED.chat_title, 
-                     thread_id = EXCLUDED.thread_id, prioridad = EXCLUDED.prioridad""",
+                     ON CONFLICT (ticket_number) DO UPDATE SET chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, 
+                     message_text = EXCLUDED.message_text, message_id = EXCLUDED.message_id, timestamp = EXCLUDED.timestamp, 
+                     chat_title = EXCLUDED.chat_title, thread_id = EXCLUDED.thread_id, prioridad = EXCLUDED.prioridad""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
                    data["message_id"], data["timestamp"], data["chat_title"], data["thread_id"], 
                    data.get("prioridad", False)))
@@ -190,10 +182,9 @@ def set_historial_solicitud(ticket_number, data):
         c.execute("""INSERT INTO historial_solicitudes 
                      (ticket_number, chat_id, username, message_text, chat_title, estado, fecha_gestion, admin_username) 
                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                     ON CONFLICT (ticket_number) DO UPDATE SET 
-                     chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, message_text = EXCLUDED.message_text, 
-                     chat_title = EXCLUDED.chat_title, estado = EXCLUDED.estado, fecha_gestion = EXCLUDED.fecha_gestion, 
-                     admin_username = EXCLUDED.admin_username""",
+                     ON CONFLICT (ticket_number) DO UPDATE SET chat_id = EXCLUDED.chat_id, username = EXCLUDED.username, 
+                     message_text = EXCLUDED.message_text, chat_title = EXCLUDED.chat_title, estado = EXCLUDED.estado, 
+                     fecha_gestion = EXCLUDED.fecha_gestion, admin_username = EXCLUDED.admin_username""",
                   (ticket_number, data["chat_id"], data["username"], data["message_text"],
                    data["chat_title"], data["estado"], data["fecha_gestion"], data["admin_username"]))
         conn.commit()
@@ -232,7 +223,7 @@ def clean_database():
         c.execute("DELETE FROM peticiones_registradas WHERE ticket_number IN (SELECT ticket_number FROM historial_solicitudes WHERE estado = 'eliminado')")
         c.execute("DELETE FROM peticiones_incorrectas WHERE timestamp < %s", (datetime.now(SPAIN_TZ) - timedelta(days=30),))
         conn.commit()
-    logger.info("Base de datos limpiada de registros obsoletos.")
+    logger.info("Base de datos limpiada.")
 
 def get_advanced_stats():
     with get_db_connection() as conn:
@@ -245,20 +236,7 @@ def get_advanced_stats():
         usuarios = c.fetchone()[0]
         return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
 
-# Limpieza automática del caché (sin afectar base de datos)
-def auto_clean_cache():
-    while True:
-        now = datetime.now(SPAIN_TZ)
-        if now.hour == 0 and now.minute == 0:  # Medianoche en España
-            grupos_seleccionados.clear()
-            menu_activos.clear()
-            logger.info("Caché limpiado automáticamente (grupos_seleccionados y menu_activos).")
-            time.sleep(86400)  # Esperar 24 horas
-        time.sleep(60)  # Revisar cada minuto
-
-threading.Thread(target=auto_clean_cache, daemon=True).start()
-
-# Configuraciones estáticas
+# **Configuraciones estáticas**
 admin_ids = set([12345678, ADMIN_PERSONAL_ID])
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
@@ -293,7 +271,7 @@ ping_respuestas = [
     "🚀 ¡Pong! Despegando con todo el power. ✨"
 ]
 
-# Funciones de utilidad
+# **Funciones de utilidad**
 def escape_markdown(text, preserve_username=False):
     if not text:
         return text
@@ -312,22 +290,18 @@ def update_grupos_estados(chat_id, title=None):
         set_grupo_estado(chat_id, title if title else f"Grupo {chat_id}")
     elif title and grupos[chat_id]["title"] == f"Grupo {chat_id}":
         set_grupo_estado(chat_id, title)
-    logger.info(f"Grupo registrado/actualizado: {chat_id} - {title or grupos.get(chat_id, {}).get('title')}")
 
 def get_spain_time():
     return datetime.now(SPAIN_TZ).strftime('%d/%m/%Y %H:%M:%S')
 
-# Notificaciones Automáticas Programadas
+# **Notificaciones automáticas**
 def send_daily_pending_notification():
     while True:
         now = datetime.now(SPAIN_TZ)
         if now.hour == 9 and now.minute == 0:
             stats = get_advanced_stats()
             if stats["pendientes"] > 0:
-                mensaje = (
-                    f"📢 ¡Buenos días, equipo! 🌞\n"
-                    f"Hay *{stats['pendientes']} solicitudes esperando acción. ¡Vamos a por ellas! 💪"
-                )
+                mensaje = f"📢 ¡Buenos días, equipo! 🌞\nHay *{stats['pendientes']} solicitudes esperando acción. ¡Vamos a por ellas! 💪"
                 safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, text=mensaje, parse_mode='Markdown')
                 safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=mensaje, parse_mode='Markdown')
             time.sleep(86400)
@@ -335,11 +309,10 @@ def send_daily_pending_notification():
 
 threading.Thread(target=send_daily_pending_notification, daemon=True).start()
 
-# Función para manejar mensajes
+# **Manejadores de comandos y mensajes**
 def handle_message(update, context):
     if not update.message:
         return
-
     message = update.message
     chat_id = message.chat_id
     user_id = message.from_user.id
@@ -350,47 +323,32 @@ def handle_message(update, context):
     canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
 
     update_grupos_estados(chat_id, chat_title)
-
     timestamp = datetime.now(SPAIN_TZ)
     timestamp_str = get_spain_time()
     username_escaped = escape_markdown(username, preserve_username=True)
     chat_title_escaped = escape_markdown(chat_title)
     message_text_escaped = escape_markdown(message_text)
-
     is_valid_request = any(cmd in message_text for cmd in VALID_REQUEST_COMMANDS)
     grupos_estados = get_grupos_estados()
 
     if is_valid_request:
-        logger.info(f"Solicitud recibida de {username} en {chat_title}: {message_text}")
         if chat_id not in CANALES_PETICIONES or thread_id != CANALES_PETICIONES[chat_id]["thread_id"]:
-            notificacion = f"⛔ Oops, {username_escaped}, parece que te equivocaste de canal. ¡Usa el canal de peticiones para arrasar! 😉"
-            warn_message = f"/warn {username_escaped} (Petición fuera del canal correspondiente)"
+            notificacion = f"⛔ Oops, {username_escaped}, parece que te equivocaste de canal. ¡Usa el canal de peticiones! 😉"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-            logger.info(f"Solicitud de {username} denegada: fuera del canal correcto")
             return
-
         if not grupos_estados.get(chat_id, {}).get("activo", True):
-            notificacion = f"🚫 ¡Ey, {username_escaped}! Las solicitudes están pausadas aquí. Habla con un admin para más info. 😊"
+            notificacion = f"🚫 ¡Ey, {username_escaped}! Las solicitudes están pausadas aquí. Habla con un admin. 😊"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            logger.info(f"Solicitudes desactivadas en {chat_id}, notificado a {username}")
             return
-
-        user_data = get_peticiones_por_usuario(user_id)
-        if not user_data:
-            set_peticiones_por_usuario(user_id, 0, chat_id, username)
-            user_data = {"count": 0, "chat_id": chat_id, "username": username}
-        elif user_data["count"] >= 2 and user_id not in admin_ids:
-            limite_message = f"⛔ ¡Ups, {username_escaped}! Has llegado al límite de 2 peticiones hoy. ¡Vuelve mañana con más ideas! 😄"
-            warn_message = f"/warn {username_escaped} (Límite de peticiones diarias superado)"
+        user_data = get_peticiones_por_usuario(user_id) or {"count": 0, "chat_id": chat_id, "username": username}
+        if user_data["count"] >= 2 and user_id not in admin_ids:
+            limite_message = f"⛔ ¡Ups, {username_escaped}! Has llegado al límite de 2 peticiones hoy. ¡Vuelve mañana! 😄"
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=limite_message, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-            logger.info(f"Límite excedido por {username}, advertencia enviada")
             return
 
         ticket_number = increment_ticket_counter()
         destino_message = (
-            f"📬 *¡Nueva solicitud en camino!* 🚀\n"
+            f"📬 *¡Nueva solicitud!* 🚀\n"
             f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
             f"🎫 *Ticket:* #{ticket_number}\n"
             f"📝 *Mensaje:* {message_text_escaped}\n"
@@ -402,121 +360,210 @@ def handle_message(update, context):
         safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=destino_message, parse_mode='Markdown')
         if sent_message:
             set_peticion_registrada(ticket_number, {
-                "chat_id": chat_id,
-                "username": username,
-                "message_text": message_text,
-                "message_id": sent_message.message_id,
-                "timestamp": timestamp,
-                "chat_title": chat_title,
+                "chat_id": chat_id, "username": username, "message_text": message_text,
+                "message_id": sent_message.message_id, "timestamp": timestamp, "chat_title": chat_title,
                 "thread_id": thread_id
             })
-            logger.info(f"Solicitud #{ticket_number} registrada en la base de datos")
-
-        user_data["count"] += 1
-        set_peticiones_por_usuario(user_id, user_data["count"], user_data["chat_id"], user_data["username"])
-
-        destino_message = (
-            f"📬 *¡Nueva solicitud en camino!* 🚀\n"
-            f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
-            f"🎫 *Ticket:* #{ticket_number}\n"
-            f"📊 *Petición:* {user_data['count']}/2\n"
-            f"📝 *Mensaje:* {message_text_escaped}\n"
-            f"🏠 *Grupo:* {chat_title_escaped}\n"
-            f"🕒 *Fecha:* {timestamp_str}\n"
-            "✨ *Bot de Entreshijos*"
-        )
-        if sent_message:
+            user_data["count"] += 1
+            set_peticiones_por_usuario(user_id, user_data["count"], chat_id, username)
+            destino_message = (
+                f"📬 *¡Nueva solicitud!* 🚀\n"
+                f"👤 *Usuario:* {username_escaped} (ID: {user_id})\n"
+                f"🎫 *Ticket:* #{ticket_number}\n"
+                f"📊 *Petición:* {user_data['count']}/2\n"
+                f"📝 *Mensaje:* {message_text_escaped}\n"
+                f"🏠 *Grupo:* {chat_title_escaped}\n"
+                f"🕒 *Fecha:* {timestamp_str}\n"
+                "✨ *Bot de Entreshijos*"
+            )
             safe_bot_method(bot.edit_message_text, chat_id=GROUP_DESTINO, message_id=sent_message.message_id, text=destino_message, parse_mode='Markdown')
             safe_bot_method(bot.send_message, chat_id=ADMIN_PERSONAL_ID, text=destino_message, parse_mode='Markdown')
-
-        confirmacion_message = (
-            f"🎉 *¡Solicitud en marcha!* 🚀\n"
-            f"Hola {username_escaped}, tu pedido (Ticket #{ticket_number}) ya está en el sistema.\n"
-            f"📌 *Detalles:*\n"
-            f"🆔 ID: {user_id}\n"
-            f"🏠 Grupo: {chat_title_escaped}\n"
-            f"📅 Fecha: {timestamp_str}\n"
-            f"📝 Mensaje: {message_text_escaped}\n"
-            f"⏳ ¡Pronto estará listo! {random.choice(frases_agradecimiento)}"
-        )
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=confirmacion_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-        logger.info(f"Confirmación enviada a {username} en chat {canal_info['chat_id']}")
+            confirmacion_message = (
+                f"🎉 *¡Solicitud en marcha!* 🚀\n"
+                f"Hola {username_escaped}, tu pedido (Ticket #{ticket_number}) está en el sistema.\n"
+                f"📌 *Detalles:*\n🆔 ID: {user_id}\n🏠 Grupo: {chat_title_escaped}\n📅 Fecha: {timestamp_str}\n"
+                f"📝 Mensaje: {message_text_escaped}\n⏳ ¡Pronto estará listo! {random.choice(frases_agradecimiento)}"
+            )
+            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=confirmacion_message, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
 
     elif any(word in message_text.lower() for word in ['solicito', 'solícito', 'peticion', 'petición']) and chat_id in CANALES_PETICIONES:
         add_peticion_incorrecta(user_id, timestamp, chat_id)
-        intentos_recientes = [i for i in get_peticiones_incorrectas(user_id) 
-                            if i["timestamp"].astimezone(SPAIN_TZ) > timestamp - timedelta(hours=24)]
-
-        notificacion_incorrecta = (
-            f"🤔 ¿Querías decir /solicito, {username_escaped}? Escribe */solicito [tu pedido]* para que funcione. ¡Inténtalo! 😊"
-        )
-        warn_message = f"/warn {username_escaped} (Petición mal formulada)" if len(intentos_recientes) <= 2 else f"/warn {username_escaped} (Abuso de peticiones mal formuladas)"
-
+        notificacion_incorrecta = f"🤔 ¿Querías decir /solicito, {username_escaped}? Usa */solicito [tu pedido]* para que funcione. 😊"
         safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=notificacion_incorrecta, message_thread_id=canal_info["thread_id"], parse_mode='Markdown')
-        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=warn_message, message_thread_id=canal_info["thread_id"])
-        logger.info(f"Notificación de petición incorrecta enviada a {username} en {chat_id}")
 
-# Nuevas funciones
-def handle_priorizar(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando es exclusivo del grupo destino o mi chat privado! 😅", parse_mode='Markdown')
-        return
-    args = context.args
-    if not args:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Usa: /priorizar [ticket_number] 🚀", parse_mode='Markdown')
-        return
-    try:
-        ticket_number = int(args[0])
-    except ValueError:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ ¡El número del ticket debe ser un entero! 😬", parse_mode='Markdown')
-        return
-    info = get_peticion_registrada(ticket_number)
-    if not info:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket_number} no existe! 😅", parse_mode='Markdown')
-        return
-    new_prioridad = not info["prioridad"]
-    set_peticion_registrada(ticket_number, {**info, "prioridad": new_prioridad})
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=f"{'⭐' if new_prioridad else '🌟'} *Ticket #{ticket_number} {'priorizado' if new_prioridad else 'sin prioridad'}* ✨", parse_mode='Markdown')
+    elif context.user_data.get("notify_state") == "waiting_for_message":
+        ticket = context.user_data.get("ticket_to_notify")
+        if not ticket or not get_peticion_registrada(ticket):
+            safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
+            return
+        notificacion = message_text
+        context.user_data["notify_message"] = notificacion
+        context.user_data["notify_state"] = "confirm_message"
+        keyboard = [
+            [InlineKeyboardButton("✅ Enviar", callback_data=f"notify_{ticket}_send"),
+             InlineKeyboardButton("✏️ Modificar", callback_data=f"notify_{ticket}_modify")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data=f"notify_{ticket}_cancel")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        texto = f"📢 *Confirmar notificación* ✨\nMensaje: {notificacion}\n¿Deseas enviar este mensaje al usuario?"
+        safe_bot_method(bot.send_message, chat_id=chat_id, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
 
-def handle_notificar(update, context):
-    if not update.message:
+def handle_menu(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
         return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando es exclusivo del grupo destino o mi chat privado! 😅", parse_mode='Markdown')
+    admin_username = f"@{update.message.from_user.username}" if update.message.from_user.username else "Admin sin @"
+    keyboard = [
+        [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
+        [InlineKeyboardButton("📜 Historial", callback_data="menu_historial")],
+        [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],
+        [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
+        [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
+        [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
+        [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
+        [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
+        [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    sent_message = safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"👤 {admin_username}\n📋 *¡Menú Principal!* ✨\nElige tu misión:", reply_markup=reply_markup, parse_mode='Markdown')
+    if sent_message:
+        menu_activos[(update.message.chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
+
+def handle_sumar_command(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
         return
     args = context.args
     if len(args) < 2:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Usa: /notificar [ticket_number] [mensaje] 🚀", parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ Usa: /sumar @username [número] 🚀", parse_mode='Markdown')
         return
-    try:
-        ticket_number = int(args[0])
-    except ValueError:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ ¡El número del ticket debe ser un entero! 😬", parse_mode='Markdown')
+    target_username, amount = args[0], int(args[1]) if args[1].isdigit() and int(args[1]) >= 0 else None
+    if not amount:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ ¡El número debe ser positivo y entero! 😬", parse_mode='Markdown')
+        return
+    user_id = get_user_id_by_username(target_username)
+    if not user_id:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❗ ¡No encontramos a {target_username}! 🤔", parse_mode='Markdown')
+        return
+    user_data = get_peticiones_por_usuario(user_id) or {"count": 0, "chat_id": update.message.chat_id, "username": target_username}
+    new_count = user_data['count'] + amount
+    set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], target_username)
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ ¡Añadimos {amount} a {target_username}! Total: {new_count}/2 ✨", parse_mode='Markdown')
+
+def handle_restar_command(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    args = context.args
+    if len(args) < 2:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ Usa: /restar @username [número] 🚀", parse_mode='Markdown')
+        return
+    username, amount = args[0], int(args[1]) if args[1].isdigit() and int(args[1]) >= 0 else None
+    if not amount:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ ¡El número debe ser positivo y entero! 😬", parse_mode='Markdown')
+        return
+    user_id = get_user_id_by_username(username)
+    if not user_id:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❗ ¡No encontramos a {username}! 🤔", parse_mode='Markdown')
+        return
+    user_data = get_peticiones_por_usuario(user_id)
+    if not user_data:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❗ {username} no tiene peticiones aún. 🌟", parse_mode='Markdown')
+        return
+    new_count = max(0, user_data['count'] - amount)
+    set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], user_data['username'])
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ ¡Quitamos {amount} a {username}! Total: {new_count}/2 ✨", parse_mode='Markdown')
+
+def handle_ping(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
+
+def handle_ayuda(update, context):
+    if not update.message:
+        return
+    chat_id = update.message.chat_id
+    thread_id = update.message.message_thread_id if chat_id in CANALES_PETICIONES else None
+    username = escape_markdown(f"@{update.message.from_user.username}", True) if update.message.from_user.username else "Usuario"
+    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
+    ayuda_message = (
+        f"📚 *¡Bienvenido, {username}!* ✨\n"
+        f"¿Listo para usar el bot? Aquí va la guía:\n"
+        f"📌 Usa {', '.join(VALID_REQUEST_COMMANDS)} para enviar tu pedido (máx. 2 por día).\n"
+        f"📢 Asegúrate de estar en el canal correcto.\n"
+        f"💡 Ejemplo: */solicito Mi peli favorita*.\n"
+        f"¡A disfrutar! 🚀"
+    )
+    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=ayuda_message, parse_mode='Markdown', 
+                    message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
+
+def handle_graficas(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
+        stats = dict(c.fetchall())
+    total = sum(stats.values())
+    stats_msg = (
+        f"📊 *¡Estadísticas!* ✨\n"
+        f"Total gestionadas: {total}\n"
+        f"✅ Subidas: {stats.get('subido', 0)}\n"
+        f"❌ Denegadas: {stats.get('denegado', 0)}\n"
+        f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
+        f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
+    )
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=stats_msg, parse_mode='Markdown')
+
+def handle_broadcast(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    args = context.args
+    if not args:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ Usa: /broadcast [mensaje] 🚀", parse_mode='Markdown')
+        return
+    broadcast_message = " ".join(args)
+    for canal in CANALES_PETICIONES.values():
+        safe_bot_method(bot.send_message, chat_id=canal["chat_id"], text=f"📢 *Anuncio:* ✨\n{broadcast_message}", parse_mode='Markdown', message_thread_id=canal["thread_id"])
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="✅ ¡Mensaje enviado a todos los grupos! 🚀", parse_mode='Markdown')
+
+def handle_priorizar(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    args = context.args
+    if not args or not args[0].isdigit():
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ Usa: /priorizar [ticket_number] 🚀", parse_mode='Markdown')
+        return
+    ticket_number = int(args[0])
+    info = get_peticion_registrada(ticket_number)
+    if not info:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❌ ¡El Ticket #{ticket_number} no existe! 😅", parse_mode='Markdown')
+        return
+    new_prioridad = not info["prioridad"]
+    set_peticion_registrada(ticket_number, {**info, "prioridad": new_prioridad})
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"{'⭐' if new_prioridad else '🌟'} *Ticket #{ticket_number} {'priorizado' if new_prioridad else 'sin prioridad'}* ✨", parse_mode='Markdown')
+
+def handle_notificar(update, context):
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
+        return
+    args = context.args
+    if len(args) < 2:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ Usa: /notificar [ticket_number] [mensaje] 🚀", parse_mode='Markdown')
+        return
+    ticket_number = int(args[0]) if args[0].isdigit() else None
+    if not ticket_number:
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="❗ ¡El número del ticket debe ser un entero! 😬", parse_mode='Markdown')
         return
     info = get_peticion_registrada(ticket_number) or get_historial_solicitud(ticket_number)
     if not info:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❌ ¡El Ticket #{ticket_number} no existe! 😅", parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"❌ ¡El Ticket #{ticket_number} no existe! 😅", parse_mode='Markdown')
         return
     notificacion = " ".join(args[1:])
     canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                    text=f"📢 *Notificación del equipo:* ✨\nTicket #{ticket_number}: {notificacion}\n👤 Para: {escape_markdown(info['username'], True)}", 
+                    text=f"📢 *Notificación:* ✨\nTicket #{ticket_number}: {notificacion}\n👤 Para: {escape_markdown(info['username'], True)}", 
                     parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ Notificación enviada al usuario del Ticket #{ticket_number}. 🚀", parse_mode='Markdown')
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=f"✅ Notificación enviada al usuario del Ticket #{ticket_number}. 🚀", parse_mode='Markdown')
 
 def handle_topusuarios(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando es exclusivo del grupo destino o mi chat privado! 😅", parse_mode='Markdown')
+    if not update.message or (str(update.message.chat_id) != GROUP_DESTINO and update.message.chat_id != ADMIN_PERSONAL_ID):
         return
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -530,177 +577,13 @@ def handle_topusuarios(update, context):
         """)
         top_users = c.fetchall()
     if not top_users:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡Aún no hay usuarios con solicitudes! 😅", parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text="🌟 ¡Aún no hay usuarios con solicitudes! 😅", parse_mode='Markdown')
         return
     ranking = "\n".join([f"{i+1}. {escape_markdown(username, True)} - {total} solicitudes" for i, (username, total) in enumerate(top_users)])
-    mensaje = f"🏆 *Top 5 Usuarios con Más Solicitudes* ✨\n\n{ranking}\n🕒 Actualizado: {get_spain_time()}"
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=mensaje, parse_mode='Markdown')
+    mensaje = f"🏆 *Top 5 Usuarios* ✨\n\n{ranking}\n🕒 Actualizado: {get_spain_time()}"
+    safe_bot_method(bot.send_message, chat_id=update.message.chat_id, text=mensaje, parse_mode='Markdown')
 
-# Handlers de comandos existentes
-def handle_menu(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    admin_username = f"@{message.from_user.username}" if message.from_user.username else "Admin sin @"
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando es exclusivo del grupo destino o mi chat privado! 😅", parse_mode='Markdown')
-        return
-    keyboard = [
-        [InlineKeyboardButton("📋 Pendientes", callback_data="menu_pendientes")],
-        [InlineKeyboardButton("📜 Historial", callback_data="menu_historial")],
-        [InlineKeyboardButton("📊 Gráficas", callback_data="menu_graficas")],
-        [InlineKeyboardButton("🏠 Grupos", callback_data="menu_grupos")],
-        [InlineKeyboardButton("🟢 Activar", callback_data="menu_on"), InlineKeyboardButton("🔴 Desactivar", callback_data="menu_off")],
-        [InlineKeyboardButton("➕ Sumar", callback_data="menu_sumar"), InlineKeyboardButton("➖ Restar", callback_data="menu_restar")],
-        [InlineKeyboardButton("🧹 Limpiar", callback_data="menu_clean"), InlineKeyboardButton("🏓 Ping", callback_data="menu_ping")],
-        [InlineKeyboardButton("📈 Stats", callback_data="menu_stats"), InlineKeyboardButton("🏆 Top Usuarios", callback_data="menu_topusuarios")],
-        [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    sent_message = safe_bot_method(bot.send_message, chat_id=chat_id, text=f"👤 {admin_username}\n📋 *¡Menú Principal al rescate!* ✨\nElige tu misión:", reply_markup=reply_markup, parse_mode='Markdown')
-    if sent_message:
-        menu_activos[(chat_id, sent_message.message_id)] = datetime.now(SPAIN_TZ)
-
-def handle_sumar_command(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando solo funciona en el grupo destino o mi chat privado! 😅", parse_mode='Markdown')
-        return
-    args = context.args
-    if len(args) < 2:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Usa: /sumar @username [número] 🚀", parse_mode='Markdown')
-        return
-    target_username = args[0]
-    try:
-        amount = int(args[1])
-        if amount < 0:
-            raise ValueError("El número debe ser positivo")
-    except ValueError:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ ¡El número debe ser positivo y entero! 😬", parse_mode='Markdown')
-        return
-
-    user_id = get_user_id_by_username(target_username)
-    if not user_id:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❗ ¡No encontramos a {target_username}! 🤔", parse_mode='Markdown')
-        return
-
-    user_data = get_peticiones_por_usuario(user_id)
-    if not user_data:
-        set_peticiones_por_usuario(user_id, amount, chat_id, target_username)
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ ¡Sumamos {amount} peticiones a {target_username}! Total: {amount}/2 🚀", parse_mode='Markdown')
-    else:
-        new_count = user_data['count'] + amount
-        set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], target_username)
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ ¡Añadimos {amount} a {target_username}! Nuevo total: {new_count}/2 ✨", parse_mode='Markdown')
-
-def handle_restar_command(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Este comando es solo para el grupo destino o mi chat privado! 😅", parse_mode='Markdown')
-        return
-    args = context.args
-    if len(args) < 2:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Usa: /restar @username [número] 🚀", parse_mode='Markdown')
-        return
-    username = args[0]
-    try:
-        amount = int(args[1])
-        if amount < 0:
-            raise ValueError("El número debe ser positivo")
-    except ValueError:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ ¡El número debe ser positivo y entero! 😬", parse_mode='Markdown')
-        return
-    user_id = get_user_id_by_username(username)
-    if not user_id:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❗ ¡No encontramos a {username}! 🤔", parse_mode='Markdown')
-        return
-    user_data = get_peticiones_por_usuario(user_id)
-    if not user_data:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"❗ {username} no tiene peticiones aún. 🌟", parse_mode='Markdown')
-    else:
-        new_count = max(0, user_data['count'] - amount)
-        set_peticiones_por_usuario(user_id, new_count, user_data['chat_id'], user_data['username'])
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ ¡Quitamos {amount} a {username}! Nuevo total: {new_count}/2 ✨", parse_mode='Markdown')
-
-def handle_ping(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Solo en el grupo destino o mi chat privado, por favor! 😅", parse_mode='Markdown')
-        return
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=random.choice(ping_respuestas), parse_mode='Markdown')
-
-def handle_ayuda(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    thread_id = message.message_thread_id if chat_id in CANALES_PETICIONES else None
-    username = escape_markdown(f"@{message.from_user.username}", True) if message.from_user.username else "Usuario"
-    canal_info = CANALES_PETICIONES.get(chat_id, {"chat_id": chat_id, "thread_id": None})
-    ayuda_message = (
-        f"📚 *¡Bienvenido, {username}!* ✨\n"
-        f"¿Listo para sacarle el jugo al bot? Aquí va la guía rápida:\n"
-        f"📌 Usa {', '.join(VALID_REQUEST_COMMANDS)} para enviar tu pedido (máx. 2 por día).\n"
-        f"📢 Asegúrate de estar en el canal correcto o no funcionará.\n"
-        f"💡 Ejemplo: */solicito Mi peli favorita*.\n"
-        f"¡A disfrutar y gracias por estar aquí! 🚀"
-    )
-    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=ayuda_message, parse_mode='Markdown', 
-                    message_thread_id=canal_info["thread_id"] if thread_id == canal_info["thread_id"] else None)
-
-def handle_graficas(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Solo en el grupo destino o mi chat privado, amigo! 😅", parse_mode='Markdown')
-        return
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
-        stats = dict(c.fetchall())
-
-    total = sum(stats.values())
-    stats_msg = (
-        f"📊 *¡Estadísticas frescas!* ✨\n"
-        f"Total gestionadas: {total}\n"
-        f"✅ Subidas: {stats.get('subido', 0)}\n"
-        f"❌ Denegadas: {stats.get('denegado', 0)}\n"
-        f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
-        f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
-    )
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=stats_msg, parse_mode='Markdown')
-
-def handle_broadcast(update, context):
-    if not update.message:
-        return
-    message = update.message
-    chat_id = message.chat_id
-    if str(chat_id) != GROUP_DESTINO and chat_id != ADMIN_PERSONAL_ID:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❌ ¡Solo los admins en el grupo destino o mi chat privado pueden usar esto! 😅", parse_mode='Markdown')
-        return
-    args = context.args
-    if not args:
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="❗ Usa: /broadcast [mensaje] 🚀", parse_mode='Markdown')
-        return
-    broadcast_message = " ".join(args)
-    for canal in CANALES_PETICIONES.values():
-        safe_bot_method(bot.send_message, chat_id=canal["chat_id"], text=f"📢 *Anuncio del equipo:* ✨\n{broadcast_message}", 
-                        parse_mode='Markdown', message_thread_id=canal["thread_id"])
-    safe_bot_method(bot.send_message, chat_id=chat_id, text=f"✅ ¡Mensaje enviado a todos los grupos! 🚀", parse_mode='Markdown')
-
-# Manejador de botones
+# **Manejador de botones**
 def button_handler(update, context):
     query = update.callback_query
     if not query:
@@ -709,7 +592,6 @@ def button_handler(update, context):
     data = query.data
     chat_id = query.message.chat_id
     admin_username = f"@{update.effective_user.username}" if update.effective_user.username else "Admin sin @"
-    logger.debug(f"Botón presionado: {data}")
 
     if data == "menu_principal":
         keyboard = [
@@ -724,7 +606,7 @@ def button_handler(update, context):
             [InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        safe_bot_method(query.edit_message_text, text=f"👤 {admin_username}\n📋 *¡Menú Principal al rescate!* ✨\nElige tu misión:", reply_markup=reply_markup, parse_mode='Markdown')
+        safe_bot_method(query.edit_message_text, text=f"👤 {admin_username}\n📋 *¡Menú Principal!* ✨\nElige tu misión:", reply_markup=reply_markup, parse_mode='Markdown')
         return
 
     if data == "menu_close":
@@ -739,31 +621,25 @@ def button_handler(update, context):
             c.execute("SELECT ticket_number, username, chat_title, prioridad FROM peticiones_registradas ORDER BY prioridad DESC, ticket_number")
             pendientes = c.fetchall()
         if not pendientes:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡No hay nada pendiente! Todo al día. 😎", parse_mode='Markdown')
+            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡No hay nada pendiente! 😎", parse_mode='Markdown')
             safe_bot_method(query.message.delete)
             return
-
         ITEMS_PER_PAGE = 5
         page = 1
         start_idx = (page - 1) * ITEMS_PER_PAGE
         end_idx = start_idx + ITEMS_PER_PAGE
         page_items = pendientes[start_idx:end_idx]
         total_pages = (len(pendientes) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
-
         keyboard = [[InlineKeyboardButton(f"{'⭐ ' if prioridad else ''}#{ticket} - {escape_markdown(username, True)} ({escape_markdown(chat_title)})",
                                         callback_data=f"pend_{ticket}")] for ticket, username, chat_title, prioridad in page_items]
-        nav_buttons = [
-            InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"),
-            InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")
-        ]
+        nav_buttons = [InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
         if page > 1:
             nav_buttons.insert(1, InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
         if page < total_pages:
             nav_buttons.insert(-1, InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
         keyboard.append(nav_buttons)
         reply_markup = InlineKeyboardMarkup(keyboard)
-
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"📋 *Pendientes (Página {page}/{total_pages})* 🚀\n¡Elige una solicitud para actuar!", reply_markup=reply_markup, parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"📋 *Pendientes (Página {page}/{total_pages})* 🚀\n¡Elige una solicitud!", reply_markup=reply_markup, parse_mode='Markdown')
         safe_bot_method(query.message.delete)
         return
 
@@ -774,29 +650,12 @@ def button_handler(update, context):
                       "FROM historial_solicitudes ORDER BY ticket_number DESC LIMIT 5")
             solicitudes = c.fetchall()
         if not solicitudes:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡El historial está limpio! Nada gestionado aún. 😄", parse_mode='Markdown')
+            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡El historial está limpio! 😄", parse_mode='Markdown')
             safe_bot_method(query.message.delete)
             return
-        historial = []
-        for row in solicitudes:
-            ticket, username, message_text, chat_title, estado, fecha_gestion, admin_username = row
-            estado_str = {
-                "subido": "✅ Aceptada",
-                "denegado": "❌ Denegada",
-                "eliminado": "🗑️ Eliminada",
-                "notificado": "📢 Respondida",
-                "limite_excedido": "🚫 Límite excedido"
-            }.get(estado, "🔄 Desconocido")
-            historial.append(
-                f"🎫 *Ticket #{ticket}*\n"
-                f"👤 Usuario: {escape_markdown(username, True)}\n"
-                f"📝 Mensaje: {escape_markdown(message_text)}\n"
-                f"🏠 Grupo: {escape_markdown(chat_title)}\n"
-                f"📅 Gestionada: {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n"
-                f"👥 Admin: {admin_username}\n"
-                f"📌 Estado: {estado_str}\n"
-            )
-        historial_message = "📜 *Historial de misiones completadas* ✨\n\n" + "\n".join(historial)
+        historial = [f"🎫 *Ticket #{ticket}*\n👤 {escape_markdown(username, True)}\n📝 {escape_markdown(message_text)}\n🏠 {escape_markdown(chat_title)}\n📅 {fecha_gestion.strftime('%d/%m/%Y %H:%M:%S')}\n👥 {admin_username}\n📌 {estado}"
+                     for ticket, username, message_text, chat_title, estado, fecha_gestion, admin_username in solicitudes]
+        historial_message = "📜 *Historial* ✨\n\n" + "\n\n".join(historial)
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         safe_bot_method(bot.send_message, chat_id=chat_id, text=historial_message, reply_markup=reply_markup, parse_mode='Markdown')
@@ -808,16 +667,8 @@ def button_handler(update, context):
             c = conn.cursor()
             c.execute("SELECT estado, COUNT(*) as count FROM historial_solicitudes GROUP BY estado")
             stats = dict(c.fetchall())
-
         total = sum(stats.values())
-        stats_msg = (
-            f"📊 *¡Estadísticas frescas!* ✨\n"
-            f"Total gestionadas: {total}\n"
-            f"✅ Subidas: {stats.get('subido', 0)}\n"
-            f"❌ Denegadas: {stats.get('denegado', 0)}\n"
-            f"🗑️ Eliminadas: {stats.get('eliminado', 0)}\n"
-            f"🚫 Límite excedido: {stats.get('limite_excedido', 0)}"
-        )
+        stats_msg = f"📊 *¡Estadísticas!* ✨\nTotal gestionadas: {total}\n✅ Subidas: {stats.get('subido', 0)}\n❌ Denegadas: {stats.get('denegado', 0)}\n🗑️ Eliminadas: {stats.get('eliminado', 0)}\n🚫 Límite: {stats.get('limite_excedido', 0)}"
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         safe_bot_method(bot.send_message, chat_id=chat_id, text=stats_msg, reply_markup=reply_markup, parse_mode='Markdown')
@@ -827,32 +678,24 @@ def button_handler(update, context):
     if data == "menu_grupos":
         grupos_estados = get_grupos_estados()
         if not grupos_estados:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡Aún no hay grupos registrados! 😅", parse_mode='Markdown')
+            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡No hay grupos registrados! 😅", parse_mode='Markdown')
             safe_bot_method(query.message.delete)
             return
-        estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})"
-                           for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
+        estado = "\n".join([f"🏠 {info['title']}: {'🟢 Activo' if info['activo'] else '🔴 Inactivo'} (ID: {gid})" for gid, info in sorted(grupos_estados.items(), key=lambda x: x[1]['title'])])
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"📋 *Estado de los grupos* 🚀\n{estado}", reply_markup=reply_markup, parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=chat_id, text=f"📋 *Estado de grupos* 🚀\n{estado}", reply_markup=reply_markup, parse_mode='Markdown')
         safe_bot_method(query.message.delete)
         return
 
     if data == "menu_on":
         grupos_estados = get_grupos_estados()
-        if not grupos_estados:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡No hay grupos registrados aún! 😅", parse_mode='Markdown')
-            safe_bot_method(query.message.delete)
-            return
-        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                        callback_data=f"select_on_{gid}")] 
-                    for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
-        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on"),
-                         InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
+        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}", callback_data=f"select_on_{gid}")] 
+                    for gid, info in grupos_estados.items() if str(gid) != GROUP_DESTINO]
+        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_on"), InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         grupos_seleccionados[chat_id] = {"accion": "on", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
-        sent_message = safe_bot_method(bot.send_message, chat_id=chat_id, text="🟢 *¡Activar solicitudes!* ✨\nSelecciona los grupos:", 
-                                      reply_markup=reply_markup, parse_mode='Markdown')
+        sent_message = safe_bot_method(bot.send_message, chat_id=chat_id, text="🟢 *¡Activar solicitudes!* ✨\nSelecciona los grupos:", reply_markup=reply_markup, parse_mode='Markdown')
         if sent_message:
             grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
         safe_bot_method(query.message.delete)
@@ -860,19 +703,12 @@ def button_handler(update, context):
 
     if data == "menu_off":
         grupos_estados = get_grupos_estados()
-        if not grupos_estados:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡No hay grupos registrados aún! 😅", parse_mode='Markdown')
-            safe_bot_method(query.message.delete)
-            return
-        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}",
-                                        callback_data=f"select_off_{gid}")] 
-                    for gid, info in grupos_estados.items() if str(gid) != '-1002641818457']
-        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off"),
-                         InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
+        keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}", callback_data=f"select_off_{gid}")] 
+                    for gid, info in grupos_estados.items() if str(gid) != GROUP_DESTINO]
+        keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data="confirm_off"), InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
         reply_markup = InlineKeyboardMarkup(keyboard)
         grupos_seleccionados[chat_id] = {"accion": "off", "grupos": set(), "mensaje_id": None, "estado": "seleccion"}
-        sent_message = safe_bot_method(bot.send_message, chat_id=chat_id, text="🔴 *¡Desactivar solicitudes!* ✨\nSelecciona los grupos:", 
-                                      reply_markup=reply_markup, parse_mode='Markdown')
+        sent_message = safe_bot_method(bot.send_message, chat_id=chat_id, text="🔴 *¡Desactivar solicitudes!* ✨\nSelecciona los grupos:", reply_markup=reply_markup, parse_mode='Markdown')
         if sent_message:
             grupos_seleccionados[chat_id]["mensaje_id"] = sent_message.message_id
         safe_bot_method(query.message.delete)
@@ -890,7 +726,7 @@ def button_handler(update, context):
 
     if data == "menu_clean":
         clean_database()
-        safe_bot_method(bot.send_message, chat_id=chat_id, text="🧹 *¡Base de datos reluciente!* ✨\nRegistros obsoletos fuera.", parse_mode='Markdown')
+        safe_bot_method(bot.send_message, chat_id=chat_id, text="🧹 *¡Base de datos limpia!* ✨", parse_mode='Markdown')
         safe_bot_method(query.message.delete)
         return
 
@@ -901,13 +737,7 @@ def button_handler(update, context):
 
     if data == "menu_stats":
         stats = get_advanced_stats()
-        stats_msg = (
-            f"📈 *¡Estadísticas al día!* ✨\n"
-            f"📋 Pendientes: {stats['pendientes']}\n"
-            f"📜 Gestionadas: {stats['gestionadas']}\n"
-            f"👥 Usuarios: {stats['usuarios']}\n"
-            f"🕒 Actualizado: {get_spain_time()}"
-        )
+        stats_msg = f"📈 *¡Estadísticas!* ✨\n📋 Pendientes: {stats['pendientes']}\n📜 Gestionadas: {stats['gestionadas']}\n👥 Usuarios: {stats['usuarios']}\n🕒 {get_spain_time()}"
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         safe_bot_method(bot.send_message, chat_id=chat_id, text=stats_msg, reply_markup=reply_markup, parse_mode='Markdown')
@@ -926,12 +756,8 @@ def button_handler(update, context):
                 LIMIT 5
             """)
             top_users = c.fetchall()
-        if not top_users:
-            safe_bot_method(bot.send_message, chat_id=chat_id, text="🌟 ¡Aún no hay usuarios con solicitudes! 😅", parse_mode='Markdown')
-            safe_bot_method(query.message.delete)
-            return
-        ranking = "\n".join([f"{i+1}. {escape_markdown(username, True)} - {total} solicitudes" for i, (username, total) in enumerate(top_users)])
-        mensaje = f"🏆 *Top 5 Usuarios con Más Solicitudes* ✨\n\n{ranking}\n🕒 Actualizado: {get_spain_time()}"
+        ranking = "\n".join([f"{i+1}. {escape_markdown(username, True)} - {total} solicitudes" for i, (username, total) in enumerate(top_users)]) if top_users else "🌟 ¡Aún no hay usuarios! 😅"
+        mensaje = f"🏆 *Top 5 Usuarios* ✨\n\n{ranking}\n🕒 Actualizado: {get_spain_time()}"
         keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         safe_bot_method(bot.send_message, chat_id=chat_id, text=mensaje, reply_markup=reply_markup, parse_mode='Markdown')
@@ -942,7 +768,6 @@ def button_handler(update, context):
         if chat_id not in grupos_seleccionados:
             return
         estado = grupos_seleccionados[chat_id]["estado"]
-
         if estado == "seleccion" and (data.startswith("select_on_") or data.startswith("select_off_")):
             accion = "on" if data.startswith("select_on_") else "off"
             grupo_id = int(data.split("_")[2])
@@ -953,13 +778,10 @@ def button_handler(update, context):
             grupos_estados = get_grupos_estados()
             keyboard = [[InlineKeyboardButton(f"{info['title']} {'🟢' if info['activo'] else '🔴'}{' ✅' if gid in grupos_seleccionados[chat_id]['grupos'] else ''}",
                                             callback_data=f"select_{accion}_{gid}")] for gid, info in grupos_estados.items()]
-            keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}"),
-                             InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
+            keyboard.append([InlineKeyboardButton("✅ Confirmar", callback_data=f"confirm_{accion}"), InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")])
             reply_markup = InlineKeyboardMarkup(keyboard)
-            safe_bot_method(query.edit_message_text, text=f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* ✨\nSelecciona los grupos:", 
-                                    reply_markup=reply_markup, parse_mode='Markdown')
+            safe_bot_method(query.edit_message_text, text=f"{'🟢' if accion == 'on' else '🔴'} *{'Activar' if accion == 'on' else 'Desactivar'} solicitudes* ✨\nSelecciona los grupos:", reply_markup=reply_markup, parse_mode='Markdown')
             return
-
         if estado == "seleccion" and (data == "confirm_on" or data == "confirm_off"):
             accion = "on" if data == "confirm_on" else "off"
             if not grupos_seleccionados[chat_id]["grupos"]:
@@ -970,8 +792,7 @@ def button_handler(update, context):
             for grupo_id in grupos_seleccionados[chat_id]["grupos"]:
                 set_grupo_estado(grupo_id, grupos_estados[grupo_id]["title"], accion == "on")
                 canal_info = CANALES_PETICIONES.get(grupo_id, {"chat_id": grupo_id, "thread_id": None})
-                mensaje = "🎉 *¡Solicitudes ON de nuevo!* 🚀\nYa puedes enviar tus pedidos (máx. 2/día)." if accion == "on" else \
-                          "🚫 *Solicitudes en pausa* ✨\nEsperamos volver pronto."
+                mensaje = "🎉 *¡Solicitudes ON!* 🚀\nYa puedes enviar tus pedidos (máx. 2/día)." if accion == "on" else "🚫 *Solicitudes pausadas* ✨\nVolveremos pronto."
                 safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], text=mensaje, parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
             texto = f"{'🟢' if accion == 'on' else '🔴'} *Solicitudes {'activadas' if accion == 'on' else 'desactivadas'} y notificadas.* ✨"
             keyboard = [[InlineKeyboardButton("🔙 Menú", callback_data="menu_principal")]]
@@ -994,21 +815,16 @@ def button_handler(update, context):
             start_idx = (page - 1) * ITEMS_PER_PAGE
             end_idx = start_idx + ITEMS_PER_PAGE
             page_items = pendientes[start_idx:end_idx]
-
             keyboard = [[InlineKeyboardButton(f"{'⭐ ' if prioridad else ''}#{ticket} - {escape_markdown(username, True)} ({escape_markdown(chat_title)})",
                                             callback_data=f"pend_{ticket}")] for ticket, username, chat_title, prioridad in page_items]
-            nav_buttons = [
-                InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"),
-                InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")
-            ]
+            nav_buttons = [InlineKeyboardButton("🔙 Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
             if page > 1:
                 nav_buttons.insert(1, InlineKeyboardButton("⬅️ Anterior", callback_data=f"pend_page_{page-1}"))
             if page < total_pages:
                 nav_buttons.insert(-1, InlineKeyboardButton("Siguiente ➡️", callback_data=f"pend_page_{page+1}"))
             keyboard.append(nav_buttons)
             reply_markup = InlineKeyboardMarkup(keyboard)
-            safe_bot_method(query.edit_message_text, text=f"📋 *Pendientes (Página {page}/{total_pages})* 🚀\n¡Elige una solicitud para actuar!", 
-                                    reply_markup=reply_markup, parse_mode='Markdown')
+            safe_bot_method(query.edit_message_text, text=f"📋 *Pendientes (Página {page}/{total_pages})* 🚀\n¡Elige una solicitud!", reply_markup=reply_markup, parse_mode='Markdown')
             return
 
         ticket = int(data.split("_")[1])
@@ -1017,12 +833,13 @@ def button_handler(update, context):
             safe_bot_method(query.edit_message_text, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
             return
 
-        if len(data.split("_")) == 2:  # Mostrar opciones iniciales
+        if len(data.split("_")) == 2:
             keyboard = [
                 [InlineKeyboardButton("✅ Subido", callback_data=f"pend_{ticket}_subido")],
                 [InlineKeyboardButton("❌ Denegado", callback_data=f"pend_{ticket}_denegado")],
                 [InlineKeyboardButton("🗑️ Eliminar", callback_data=f"pend_{ticket}_eliminar")],
                 [InlineKeyboardButton(f"{'🌟 Quitar Prioridad' if info['prioridad'] else '⭐ Priorizar'}", callback_data=f"pend_{ticket}_priorizar")],
+                [InlineKeyboardButton("📢 Notificar", callback_data=f"pend_{ticket}_notificar")],
                 [InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1032,12 +849,12 @@ def button_handler(update, context):
                 f"📝 Mensaje: {escape_markdown(info['message_text'])}\n"
                 f"🏠 Grupo: {escape_markdown(info['chat_title'])}\n"
                 f"🕒 Fecha: {info['timestamp'].strftime('%d/%m/%Y %H:%M:%S')}\n"
-                "✨ ¿Qué hacemos con esto?"
+                "✨ ¿Qué hacemos?"
             )
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if len(data.split("_")) == 3:  # Mostrar confirmación o priorizar
+        if len(data.split("_")) == 3:
             accion = data.split("_")[2]
             if accion in ["subido", "denegado", "eliminar"]:
                 accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
@@ -1058,17 +875,18 @@ def button_handler(update, context):
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
                 return
+            elif accion == "notificar":
+                context.user_data["ticket_to_notify"] = ticket
+                context.user_data["notify_state"] = "waiting_for_message"
+                safe_bot_method(query.edit_message_text, text="📢 *Notificar al usuario* ✨\nEnvía el mensaje que deseas notificar.", parse_mode='Markdown')
+                return
 
-        if data.endswith("_confirm"):  # Procesar confirmación
+        if data.endswith("_confirm"):
             accion = data.split("_")[2]
             accion_str = {"subido": "Subido", "denegado": "Denegado", "eliminar": "Eliminado"}[accion]
             set_historial_solicitud(ticket, {
-                "chat_id": info["chat_id"],
-                "username": info["username"],
-                "message_text": info["message_text"],
-                "chat_title": info["chat_title"],
-                "estado": accion,
-                "fecha_gestion": datetime.now(SPAIN_TZ),
+                "chat_id": info["chat_id"], "username": info["username"], "message_text": info["message_text"],
+                "chat_title": info["chat_title"], "estado": accion, "fecha_gestion": datetime.now(SPAIN_TZ),
                 "admin_username": admin_username
             })
             keyboard = [
@@ -1081,7 +899,7 @@ def button_handler(update, context):
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if data.endswith("_notify_yes") or data.endswith("_notify_no"):  # Manejar notificación
+        if data.endswith("_notify_yes") or data.endswith("_notify_no"):
             accion = data.split("_")[2]
             notify = data.endswith("_notify_yes")
             username_escaped = escape_markdown(info["username"], True)
@@ -1091,34 +909,72 @@ def button_handler(update, context):
                 canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
                 if accion == "subido":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"✅ ¡Buenas, {username_escaped}! Tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ya está arriba. ¡Gracias al equipo EntresHijos! 🎉", 
+                                   text=f"✅ ¡Buenas, {username_escaped}! Tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" ya está arriba. ¡Gracias al equipo! 🎉", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "denegado":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"❌ Hola {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" fue denegada por el equipo EntresHijos. ¡Sigue intentándolo! 😊", 
+                                   text=f"❌ Hola {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" fue denegada. ¡Sigue intentándolo! 😊", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                 elif accion == "eliminar":
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                   text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" fue eliminada por el equipo EntresHijos. ✨", 
+                                   text=f"ℹ️ {username_escaped}, tu solicitud (Ticket #{ticket}) \"{message_text_escaped}\" fue eliminada. ✨", 
                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
                     safe_bot_method(bot.delete_message, chat_id=GROUP_DESTINO, message_id=info["message_id"])
             del_peticion_registrada(ticket)
-            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), 
-                        InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"✅ *Ticket #{ticket} procesado como {accion_str}{' y notificado' if notify else ''}.* ✨\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-        if data.endswith("_cancel"):  # Cancelar acción
-            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), 
-                        InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+        if data.endswith("_cancel"):
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             texto = f"❌ *Acción cancelada para el Ticket #{ticket}.* ✨\n(Hora: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             return
 
-# Añadir handlers al dispatcher
+    if data.startswith("notify_"):
+        parts = data.split("_")
+        ticket = parts[1]
+        accion = parts[2]
+        info = get_peticion_registrada(ticket)
+        if not info:
+            safe_bot_method(query.edit_message_text, text=f"❌ ¡El Ticket #{ticket} no existe! 😅", parse_mode='Markdown')
+            return
+        if accion == "send":
+            notificacion = context.user_data.get("notify_message")
+            if not notificacion:
+                safe_bot_method(query.edit_message_text, text="❌ No hay mensaje para enviar. 😅", parse_mode='Markdown')
+                return
+            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
+            username_escaped = escape_markdown(info["username"], True)
+            safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                            text=f"📢 *Notificación:* ✨\nTicket #{ticket}: {notificacion}\n👤 Para: {username_escaped}", 
+                            parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+            texto = f"✅ *Notificación enviada al usuario del Ticket #{ticket}.* 🚀\n(Hora: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data.pop("notify_state", None)
+            context.user_data.pop("ticket_to_notify", None)
+            context.user_data.pop("notify_message", None)
+            return
+        elif accion == "modify":
+            context.user_data["notify_state"] = "waiting_for_message"
+            safe_bot_method(query.edit_message_text, text="✏️ *Modificar notificación* ✨\nEnvía el nuevo mensaje.", parse_mode='Markdown')
+            return
+        elif accion == "cancel":
+            texto = f"❌ *Notificación cancelada para el Ticket #{ticket}.* ✨\n(Hora: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            keyboard = [[InlineKeyboardButton("🔙 Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("🏠 Menú", callback_data="menu_principal")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data.pop("notify_state", None)
+            context.user_data.pop("ticket_to_notify", None)
+            context.user_data.pop("notify_message", None)
+            return
+
+# **Añadir handlers al dispatcher**
 dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
 dispatcher.add_handler(CommandHandler('menu', handle_menu))
 dispatcher.add_handler(CommandHandler('sumar', handle_sumar_command))
@@ -1132,29 +988,21 @@ dispatcher.add_handler(CommandHandler('notificar', handle_notificar))
 dispatcher.add_handler(CommandHandler('topusuarios', handle_topusuarios))
 dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-# Rutas Flask
+# **Rutas Flask**
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        update_json = request.get_json(force=True)
-        if not update_json:
-            logger.error("No se recibió JSON válido")
-            return 'ok', 200
+    update_json = request.get_json(force=True)
+    if update_json:
         update = telegram.Update.de_json(update_json, bot)
-        if not update:
-            logger.error("No se pudo deserializar la actualización")
-            return 'ok', 200
-        dispatcher.process_update(update)
-        return 'ok', 200
-    except Exception as e:
-        logger.error(f"Error en webhook: {str(e)}")
-        return 'ok', 200
+        if update:
+            dispatcher.process_update(update)
+    return 'ok', 200
 
 @app.route('/')
 def health_check():
     return "¡Bot de Entreshijos está en órbita! 🚀", 200
 
-# Inicializar la base de datos y configurar webhook al arrancar
+# **Inicio del bot**
 if __name__ == '__main__':
     init_db()
     for chat_id, title in GRUPOS_PREDEFINIDOS.items():
