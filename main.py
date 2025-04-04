@@ -239,16 +239,14 @@ def get_advanced_stats():
 def check_pending_reminders():
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT ticket_number, username, message_text, chat_title, timestamp FROM peticiones_registradas")
-        pendientes = c.fetchall()
-    now = datetime.now(SPAIN_TZ)
-    for row in pendientes:
-        ticket, username, message_text, chat_title, timestamp = row
-        if (now - timestamp.astimezone(SPAIN_TZ)).days > 3:
-            safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, 
-                            text=f"⏰ *Recordatorio* ✅\nTicket #{ticket} de {escape_markdown(username, True)} en {escape_markdown(chat_title)} lleva más de 3 días pendiente.\nMensaje: {escape_markdown(message_text)}", 
-                            parse_mode='Markdown')
-            logger.info(f"Recordatorio enviado para Ticket #{ticket}")
+        c.execute("SELECT COUNT(*) FROM peticiones_registradas WHERE timestamp < %s", 
+                  (datetime.now(SPAIN_TZ) - timedelta(days=3),))
+        pendientes = c.fetchone()[0]
+    if pendientes > 0:
+        safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, 
+                        text=f"⏰ *Recordatorio* ✅\nTienes {pendientes} peticiones pendientes.", 
+                        parse_mode='Markdown')
+        logger.info(f"Recordatorio enviado: {pendientes} peticiones pendientes")
 
 # Configuraciones estáticas
 GRUPOS_PREDEFINIDOS = {
