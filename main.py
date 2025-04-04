@@ -236,18 +236,6 @@ def get_advanced_stats():
         usuarios = c.fetchone()[0]
         return {"pendientes": pendientes, "gestionadas": gestionadas, "usuarios": usuarios}
 
-def check_pending_reminders():
-    with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM peticiones_registradas WHERE timestamp < %s", 
-                  (datetime.now(SPAIN_TZ) - timedelta(days=3),))
-        pendientes = c.fetchone()[0]
-    if pendientes > 0:
-        safe_bot_method(bot.send_message, chat_id=GROUP_DESTINO, 
-                        text=f"⏰ *Recordatorio* ✅\nTienes {pendientes} peticiones pendientes.", 
-                        parse_mode='Markdown')
-        logger.info(f"Recordatorio enviado: {pendientes} peticiones pendientes")
-
 # Configuraciones estáticas
 GRUPOS_PREDEFINIDOS = {
     -1002350263641: "Biblioteca EnTresHijos",
@@ -1055,7 +1043,6 @@ def webhook():
 
 @app.route('/')
 def health_check():
-    check_pending_reminders()  # Ejecutar recordatorios al verificar salud
     return "Bot de Entreshijos está activo! 🤝", 200
 
 # Inicializar la base de datos y configurar webhook al arrancar
