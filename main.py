@@ -1264,18 +1264,23 @@ def button_handler(update, context):
                 safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
                 menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
                 return
+
             except Exception as e:
             logger.error(f"Error en button_handler: {str(e)}")
+            keyboard = [[InlineKeyboardButton("↩️ Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
+            return
 
-            # Configuración de los handlers
-            dispatcher.add_handler(CommandHandler("menu", handle_menu))
-            dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
-            dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
-            dispatcher.add_handler(CommandHandler("ping", handle_ping))
-            dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-            dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
-            dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
-            dispatcher.add_handler(CallbackQueryHandler(button_handler))
+# Configuración de los handlers
+dispatcher.add_handler(CommandHandler("menu", handle_menu))
+dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
+dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
+dispatcher.add_handler(CommandHandler("ping", handle_ping))
+dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
+dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
+dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
 # Rutas de Flask para el webhook
 @app.route('/')
