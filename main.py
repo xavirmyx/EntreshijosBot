@@ -1314,17 +1314,29 @@ def button_handler(update, context):
         port = int(os.getenv('PORT', 5000))
 
         # Construir la URL del webhook dinámicamente usando el dominio de Render
-        render_domain = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')  # Dominio público de Render
+        render_domain = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')
         webhook_url = f"https://{render_domain}/webhook" if render_domain != 'localhost' else f"http://localhost:{port}/webhook"
-        logger.info(f"Configurando webhook en: {webhook_url}")
+        logger.info(f"Intentando configurar webhook en: {webhook_url}")
 
-        # Configurar el webhook
-        result = safe_bot_method(bot.set_webhook, url=webhook_url)
-        if result:
+        # Configurar el webhook con manejo de errores detallado
+        try:
+            bot.set_webhook(url=webhook_url)
             logger.info(f"Webhook configurado exitosamente en {webhook_url}")
-        else:
-            logger.error("Fallo al configurar el webhook")
-            raise Exception("No se pudo configurar el webhook")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al configurar el webhook: {str(e)}")
+            raise Exception(f"No se pudo configurar el webhook: {str(e)}")
+
+        # Verificar el estado del webhook después de configurarlo
+        try:
+            webhook_info = bot.get_webhook_info()
+            logger.info(f"Estado del webhook después de configurarlo: {webhook_info}")
+            if webhook_info.url != webhook_url:
+                logger.error(f"El webhook no se configuró correctamente. URL esperada: {webhook_url}, URL actual: {webhook_info.url}")
+                raise Exception("El webhook no se configuró correctamente.")
+        except telegram.error.TelegramError as e:
+            logger.error(f"Error al verificar el estado del webhook: {str(e)}")
+            raise Exception(f"No se pudo verificar el webhook: {str(e)}")
 
         # Iniciar el servidor Flask
+        logger.info(f"Iniciando servidor en puerto {port}")
         app.run(host='0.0.0.0', port=port, debug=False)
