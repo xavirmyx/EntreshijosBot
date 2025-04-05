@@ -15,7 +15,6 @@ import time
 # Configura las variables de entorno (sin valores hardcoded)
 TOKEN = os.getenv('TOKEN')
 GROUP_DESTINO = os.getenv('GROUP_DESTINO')
-WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 # Validación estricta de variables de entorno
@@ -23,8 +22,6 @@ if not TOKEN:
     raise ValueError("TOKEN no está configurado en las variables de entorno.")
 if not GROUP_DESTINO:
     raise ValueError("GROUP_DESTINO no está configurado en las variables de entorno.")
-if not WEBHOOK_URL:
-    raise ValueError("WEBHOOK_URL no está configurado en las variables de entorno.")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL no está configurada en las variables de entorno.")
 
@@ -1265,78 +1262,89 @@ def button_handler(update, context):
                 menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
                 return
 
+            except Exception as e:
+            logger.error(f"Error en button_handler: {str(e)}")
+            keyboard = [[InlineKeyboardButton("↩️ Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
+            return
+# Rutas de Flask para el webhook
+@app.route('/', methods=['GET', 'HEAD'])
+def index():
+    return "Bot de Entreshijos está funcionando!", 200
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
+        if update:
+            logger.debug(f"Procesando actualización: {update}")
+            dispatcher.process_update(update)
+            logger.debug("Actualización procesada correctamente")
+            return 'OK', 200
+        else:
+            logger.warning("No se recibió una actualización válida")
+            return 'No update', 400
     except Exception as e:
-        logger.error(f"Error en button_handler: {str(e)}")
-        keyboard = [[InlineKeyboardButton("↩️ Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
-        return
+        logger.error(f"Error en el webhook: {str(e)}")
+        return 'Error', 500
 
-    # Rutas de Flask para el webhook
-    @app.route('/')
-    def index():
-        return "Bot de Entreshijos está funcionando!", 200
+# Configuración de los handlers
+dispatcher.add_handler(CommandHandler("menu", handle_menu))
+dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
+dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
+dispatcher.add_handler(CommandHandler("ping", handle_ping))
+dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
+dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
+dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-    @app.route('/webhook', methods=['POST'])
-    def webhook():
-        try:
-            update = telegram.Update.de_json(request.get_json(force=True), bot)
-            if update:
-                logger.debug(f"Procesando actualización: {update}")
-                dispatcher.process_update(update)
-                logger.debug("Actualización procesada correctamente")
-                return 'OK', 200
-            else:
-                logger.warning("No se recibió una actualización válida")
-                return 'No update', 400
-        except Exception as e:
-            logger.error(f"Error en el webhook: {str(e)}")
-            return 'Error', 500
+# Inicialización del programa
+if __name__ == '__main__':
+    logger.info("Iniciando el bot...")
+    init_db()
+    threading.Thread(target=check_menu_timeout, daemon=True).start()
+    threading.Thread(target=auto_clean_cache, daemon=True).start()
 
-    # Configuración de los handlers
-    dispatcher.add_handler(CommandHandler("menu", handle_menu))
-    dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
-    dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
-    dispatcher.add_handler(CommandHandler("ping", handle_ping))
-    dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-    dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
-    dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
+    # Obtener el puerto de Render o usar 5000 como fallback
+    port = int(os.getenv('PORT', 5000))
 
-    # Inicialización del programa
-    if __name__ == '__main__':
-        logger.info("Iniciando el bot...")
-        init_db()
-        threading.Thread(target=check_menu_timeout, daemon=True).start()
-        threading.Thread(target=auto_clean_cache, daemon=True).start()
+    # Construir la URL del webhook dinámicamente usando el dominio de Render
+    render_domain = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')
+    webhook_url = f"https://{render_domain}/webhook" if render_domain != 'localhost' else f"http://localhost:{port}/webhook"
+    logger.info(f"Intentando configurar webhook en: {webhook_url}")
 
-        # Obtener el puerto de Render o usar 5000 como fallback
-        port = int(os.getenv('PORT', 5000))
+    # Limpiar actualizaciones pendientes antes de configurar el webhook
+    try:
+        updates = bot.get_updates()
+        if updates:
+            last_update_id = updates[-1].update_id
+            bot.get_updates(offset=last_update_id + 1)
+            logger.info(f"Se limpiaron {len(updates)} actualizaciones pendientes.")
+        else:
+            logger.info("No había actualizaciones pendientes para limpiar.")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Error al limpiar actualizaciones pendientes: {str(e)}")
 
-        # Construir la URL del webhook dinámicamente usando el dominio de Render
-        render_domain = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')
-        webhook_url = f"https://{render_domain}/webhook" if render_domain != 'localhost' else f"http://localhost:{port}/webhook"
-        logger.info(f"Intentando configurar webhook en: {webhook_url}")
+    # Configurar el webhook con manejo de errores detallado
+    try:
+        bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook configurado exitosamente en {webhook_url}")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Error al configurar el webhook: {str(e)}")
+        raise Exception(f"No se pudo configurar el webhook: {str(e)}")
 
-        # Configurar el webhook con manejo de errores detallado
-        try:
-            bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook configurado exitosamente en {webhook_url}")
-        except telegram.error.TelegramError as e:
-            logger.error(f"Error al configurar el webhook: {str(e)}")
-            raise Exception(f"No se pudo configurar el webhook: {str(e)}")
+    # Verificar el estado del webhook después de configurarlo
+    try:
+        webhook_info = bot.get_webhook_info()
+        logger.info(f"Estado del webhook después de configurarlo: {webhook_info}")
+        if webhook_info.url != webhook_url:
+            logger.error(f"El webhook no se configuró correctamente. URL esperada: {webhook_url}, URL actual: {webhook_info.url}")
+            raise Exception("El webhook no se configuró correctamente.")
+    except telegram.error.TelegramError as e:
+        logger.error(f"Error al verificar el estado del webhook: {str(e)}")
+        raise Exception(f"No se pudo verificar el webhook: {str(e)}")
 
-        # Verificar el estado del webhook después de configurarlo
-        try:
-            webhook_info = bot.get_webhook_info()
-            logger.info(f"Estado del webhook después de configurarlo: {webhook_info}")
-            if webhook_info.url != webhook_url:
-                logger.error(f"El webhook no se configuró correctamente. URL esperada: {webhook_url}, URL actual: {webhook_info.url}")
-                raise Exception("El webhook no se configuró correctamente.")
-        except telegram.error.TelegramError as e:
-            logger.error(f"Error al verificar el estado del webhook: {str(e)}")
-            raise Exception(f"No se pudo verificar el webhook: {str(e)}")
-
-        # Iniciar el servidor Flask
-        logger.info(f"Iniciando servidor en puerto {port}")
-        app.run(host='0.0.0.0', port=port, debug=False)
+    # Iniciar el servidor Flask
+    logger.info(f"Iniciando servidor en puerto {port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
