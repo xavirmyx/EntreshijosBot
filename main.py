@@ -1265,54 +1265,54 @@ def button_handler(update, context):
                 menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
                 return
 
-            except Exception as e:
-            logger.error(f"Error en button_handler: {str(e)}")
-            keyboard = [[InlineKeyboardButton("↩️ Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
-            return
-
-# Configuración de los handlers
-dispatcher.add_handler(CommandHandler("menu", handle_menu))
-dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
-dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
-dispatcher.add_handler(CommandHandler("ping", handle_ping))
-dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
-dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
-dispatcher.add_handler(CallbackQueryHandler(button_handler))
-
-# Rutas de Flask para el webhook
-@app.route('/')
-def index():
-    return "Bot de Entreshijos está funcionando!", 200
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = telegram.Update.de_json(request.get_json(force=True), bot)
-        if update:
-            dispatcher.process_update(update)
-            logger.debug("Actualización procesada correctamente")
-            return 'OK', 200
-        else:
-            logger.warning("No se recibió una actualización válida")
-            return 'No update', 400
     except Exception as e:
-        logger.error(f"Error en el webhook: {str(e)}")
-        return 'Error', 500
+        logger.error(f"Error en button_handler: {str(e)}")
+        keyboard = [[InlineKeyboardButton("↩️ Menú", callback_data="menu_principal"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
+        return
 
-# Inicialización del programa
-if __name__ == '__main__':
-    logger.info("Iniciando el bot...")
-    init_db()
-    threading.Thread(target=check_menu_timeout, daemon=True).start()
-    threading.Thread(target=auto_clean_cache, daemon=True).start()
-    port = int(os.getenv('PORT', 5000))
-    result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
-    if result:
-        logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
-    else:
-        logger.error("Fallo al configurar el webhook")
-        raise Exception("No se pudo configurar el webhook")
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # Rutas de Flask para el webhook
+    @app.route('/')
+    def index():
+        return "Bot de Entreshijos está funcionando!", 200
+
+    @app.route('/webhook', methods=['POST'])
+    def webhook():
+        try:
+            update = telegram.Update.de_json(request.get_json(force=True), bot)
+            if update:
+                dispatcher.process_update(update)
+                logger.debug("Actualización procesada correctamente")
+                return 'OK', 200
+            else:
+                logger.warning("No se recibió una actualización válida")
+                return 'No update', 400
+        except Exception as e:
+            logger.error(f"Error en el webhook: {str(e)}")
+            return 'Error', 500
+
+    # Configuración de los handlers
+    dispatcher.add_handler(CommandHandler("menu", handle_menu))
+    dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
+    dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
+    dispatcher.add_handler(CommandHandler("ping", handle_ping))
+    dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+    dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
+    dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
+    dispatcher.add_handler(CallbackQueryHandler(button_handler))
+
+    # Inicialización del programa
+    if __name__ == '__main__':
+        logger.info("Iniciando el bot...")
+        init_db()
+        threading.Thread(target=check_menu_timeout, daemon=True).start()
+        threading.Thread(target=auto_clean_cache, daemon=True).start()
+        port = int(os.getenv('PORT', 5000))
+        result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+        if result:
+            logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
+        else:
+            logger.error("Fallo al configurar el webhook")
+            raise Exception("No se pudo configurar el webhook")
+        app.run(host='0.0.0.0', port=port, debug=False)
