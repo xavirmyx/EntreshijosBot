@@ -1168,6 +1168,17 @@ def button_handler(update, context):
                 menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
                 return
 
+            if data.endswith("subido_url_yes"):  # Solicitar URL
+                pending_urls[update.effective_user.id] = {"ticket": ticket, "url": None}
+                keyboard = [
+                    [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                texto = f"🔗 *Añadir URL para Ticket #{ticket}* ✅\nPor favor, envía la URL como mensaje (ejemplo: https://ejemplo.com)"
+                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+                return
+
             if data.endswith("subido_url_edit"):  # Editar URL
                 user_id = update.effective_user.id
                 if user_id in pending_urls and pending_urls[user_id]["ticket"] == ticket:
@@ -1266,37 +1277,37 @@ def button_handler(update, context):
             dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
             dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-            # Rutas de Flask para el webhook
-            @app.route('/')
-            def index():
-            return "Bot de Entreshijos está funcionando!", 200
+# Rutas de Flask para el webhook
+@app.route('/')
+def index():
+    return "Bot de Entreshijos está funcionando!", 200
 
-            @app.route('/webhook', methods=['POST'])
-            def webhook():
-            try:
-            update = telegram.Update.de_json(request.get_json(force=True), bot)
-            if update:
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
+        if update:
             dispatcher.process_update(update)
             logger.debug("Actualización procesada correctamente")
             return 'OK', 200
-            else:
+        else:
             logger.warning("No se recibió una actualización válida")
             return 'No update', 400
-            except Exception as e:
-            logger.error(f"Error en el webhook: {str(e)}")
-            return 'Error', 500
+    except Exception as e:
+        logger.error(f"Error en el webhook: {str(e)}")
+        return 'Error', 500
 
-            # Inicialización del programa
-            if __name__ == '__main__':
-            logger.info("Iniciando el bot...")
-            init_db()
-            threading.Thread(target=check_menu_timeout, daemon=True).start()
-            threading.Thread(target=auto_clean_cache, daemon=True).start()
-            port = int(os.getenv('PORT', 5000))
-            result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
-            if result:
-            logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
-            else:
-            logger.error("Fallo al configurar el webhook")
-            raise Exception("No se pudo configurar el webhook")
-            app.run(host='0.0.0.0', port=port, debug=False)
+# Inicialización del programa
+if __name__ == '__main__':
+    logger.info("Iniciando el bot...")
+    init_db()
+    threading.Thread(target=check_menu_timeout, daemon=True).start()
+    threading.Thread(target=auto_clean_cache, daemon=True).start()
+    port = int(os.getenv('PORT', 5000))
+    result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+    if result:
+        logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
+    else:
+        logger.error("Fallo al configurar el webhook")
+        raise Exception("No se pudo configurar el webhook")
+    app.run(host='0.0.0.0', port=port, debug=False)
