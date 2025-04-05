@@ -1,16 +1,3 @@
-Aquí te presento una versión mejorada de tu `main.py` con todas las características solicitadas: menú organizado con botones de regreso, cierre automático del menú tras 1 hora de inactividad, opción de añadir URL al aprobar solicitudes, flujo profesional y fluido, confirmación para activar/desactivar grupos con opción de alerta, limpieza automática de caché y datos innecesarios, y una estructura robusta sin errores. He mantenido intactos el webhook y la conectividad con la base de datos, optimizando solo la lógica del bot.
-
-### Cambios realizados:
-1. **Menú organizado y profesional**: Todos los menús tienen botones de regreso al menú principal (`↩️ Menú`) y cerrar (`❌ Cerrar`) consistentes.
-2. **Cierre automático del menú**: Se implementa un temporizador de 1 hora para eliminar menús inactivos usando `menu_activos`.
-3. **Opción de URL en "Subido"**: Al marcar una solicitud como "Subido", el bot pregunta si desea agregar una URL, permite ingresarla, editarla y confirmarla antes de notificar al usuario.
-4. **Confirmación para activar/desactivar grupos**: Se pide confirmación y luego una opción para enviar una alerta al grupo afectado.
-5. **Limpieza automática de caché**: Se agrega una función para eliminar datos obsoletos cada 24 horas sin afectar el funcionamiento del bot.
-6. **Flujo profesional y fluido**: Mensajes claros, formateo Markdown consistente, y manejo de errores robusto.
-
-Aquí está el código corregido y mejorado:
-
-```python
 from flask import Flask, request
 import telegram
 from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler
