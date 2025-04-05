@@ -1168,4 +1168,17 @@ def button_handler(update, context):
                  InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id
+            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
+            if accion == "subido":
+                safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                                text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*.\n{random.choice(frases_agradecimiento)}", 
+                                parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+            elif accion == "denegado":
+                safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                                text=f"❌ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido rechazada por el *Equipo de EntresHijos*. Contacta a un administrador para más detalles.", 
+                                parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+            del_peticion_registrada(ticket)
+            texto = f"✅ *Ticket #{ticket} procesado como {accion_str}* 😊\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+            return
