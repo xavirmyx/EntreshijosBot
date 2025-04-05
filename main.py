@@ -1137,7 +1137,7 @@ def button_handler(update, context):
                 "admin_username": admin_username,
                 "url": url
             })
-            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": None})
+            canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
             safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
                             text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*. Aquí tienes el enlace: {url}\nGracias por tu paciencia! 😊", 
                             parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
@@ -1182,3 +1182,45 @@ def button_handler(update, context):
             safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
             menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
             return
+
+        if data.endswith("_cancel"):  # Cancelar acción
+            keyboard = [
+                [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), 
+                 InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            texto = f"❌ *Acción cancelada para Ticket #{ticket}* 😊\nVuelve a seleccionar una opción si deseas continuar."
+            safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+            menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+            return
+
+        # Configuración de los handlers
+        dispatcher.add_handler(CommandHandler("menu", handle_menu))
+        dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
+        dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
+        dispatcher.add_handler(CommandHandler("ping", handle_ping))
+        dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+        dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
+        dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
+        dispatcher.add_handler(CallbackQueryHandler(button_handler))
+
+        # Rutas de Flask para el webhook
+        @app.route('/')
+        def index():
+         return "Bot de Entreshijos está funcionando!", 200
+
+        @app.route('/webhook', methods=['POST'])
+        def webhook():
+        update = telegram.Update.de_json(request.get_json(force=True), bot)
+        dispatcher.process_update(update)
+        return 'OK', 200
+
+# Inicialización del programa
+     if __name__ == '__main__':
+        init_db()
+        threading.Thread(target=check_menu_timeout, daemon=True).start()
+        threading.Thread(target=auto_clean_cache, daemon=True).start()
+        port = int(os.getenv('PORT', 5000))
+        safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+        logger.info(f"Webhook configurado en {WEBHOOK_URL}")
+        app.run(host='0.0.0.0', port=port, debug=False)
