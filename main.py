@@ -1268,6 +1268,7 @@ def button_handler(update, context):
             reply_markup = InlineKeyboardMarkup(keyboard)
             safe_bot_method(query.edit_message_text, text="❌ Ocurrió un error al procesar la acción. Por favor, intenta de nuevo.", reply_markup=reply_markup, parse_mode='Markdown')
             return
+
 # Rutas de Flask para el webhook
 @app.route('/', methods=['GET', 'HEAD'])
 def index():
@@ -1348,4 +1349,3 @@ if __name__ == '__main__':
     # Iniciar el servidor Flask
     logger.info(f"Iniciando servidor en puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False)
-    
