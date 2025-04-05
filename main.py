@@ -1282,6 +1282,7 @@ def button_handler(update, context):
         try:
             update = telegram.Update.de_json(request.get_json(force=True), bot)
             if update:
+                logger.debug(f"Procesando actualización: {update}")
                 dispatcher.process_update(update)
                 logger.debug("Actualización procesada correctamente")
                 return 'OK', 200
@@ -1308,11 +1309,22 @@ def button_handler(update, context):
         init_db()
         threading.Thread(target=check_menu_timeout, daemon=True).start()
         threading.Thread(target=auto_clean_cache, daemon=True).start()
+
+        # Obtener el puerto de Render o usar 5000 como fallback
         port = int(os.getenv('PORT', 5000))
-        result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+
+        # Construir la URL del webhook dinámicamente usando el dominio de Render
+        render_domain = os.getenv('RENDER_EXTERNAL_HOSTNAME', 'localhost')  # Dominio público de Render
+        webhook_url = f"https://{render_domain}/webhook" if render_domain != 'localhost' else f"http://localhost:{port}/webhook"
+        logger.info(f"Configurando webhook en: {webhook_url}")
+
+        # Configurar el webhook
+        result = safe_bot_method(bot.set_webhook, url=webhook_url)
         if result:
-            logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
+            logger.info(f"Webhook configurado exitosamente en {webhook_url}")
         else:
             logger.error("Fallo al configurar el webhook")
             raise Exception("No se pudo configurar el webhook")
+
+        # Iniciar el servidor Flask
         app.run(host='0.0.0.0', port=port, debug=False)
