@@ -1,6 +1,4 @@
-from flask import Flask app = Flask(__name__)
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+from flask import Flask, request
 import telegram
 from telegram.ext import Dispatcher, MessageHandler, CommandHandler, Filters, CallbackQueryHandler
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1195,121 +1193,121 @@ def button_handler(update, context):
                 menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
                 return
 
-            if data.endswith("subido_url_confirm"):  # Confirmar y enviar con URL
-                user_id = update.effective_user.id
-                if user_id not in pending_urls or pending_urls[user_id]["ticket"] != ticket:
-                    return
-                url = pending_urls[user_id]["url"]
-                set_historial_solicitud(ticket, {
-                    "chat_id": info["chat_id"],
-                    "username": info["username"],
-                    "message_text": info["message_text"],
-                    "chat_title": info["chat_title"],
-                    "estado": "subido",
-                    "fecha_gestion": datetime.now(SPAIN_TZ),
-                    "admin_username": admin_username,
-                    "url": url
-                })
-                canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
-                safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*. Aquí tienes el enlace: {url}\nGracias por tu paciencia! 😊", 
-                                parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-                del_peticion_registrada(ticket)
-                del pending_urls[user_id]
-                keyboard = [[InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                texto = f"✅ *Ticket #{ticket} procesado y notificado con URL* 😊\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
-                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
-                return
-
-            if data.endswith("subido_url_no") or data.endswith("denegado_confirm") or data.endswith("eliminar_confirm"):  # Procesar sin URL o denegado/eliminar
-                accion = data.split("_")[2]
-                accion_str = {"subido": "Aprobado", "denegado": "Rechazado", "eliminar": "Eliminado"}[accion]
-                if accion != "subido":  # Solo para denegado y eliminar
+                if data.endswith("subido_url_confirm"):  # Confirmar y enviar con URL
+                    user_id = update.effective_user.id
+                    if user_id not in pending_urls or pending_urls[user_id]["ticket"] != ticket:
+                        return
+                    url = pending_urls[user_id]["url"]
                     set_historial_solicitud(ticket, {
                         "chat_id": info["chat_id"],
                         "username": info["username"],
                         "message_text": info["message_text"],
                         "chat_title": info["chat_title"],
-                        "estado": accion,
+                        "estado": "subido",
                         "fecha_gestion": datetime.now(SPAIN_TZ),
-                        "admin_username": admin_username
+                        "admin_username": admin_username,
+                        "url": url
                     })
-                keyboard = [
-                    [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), 
-                     InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
-                if accion == "subido":
+                    canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
                     safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                    text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*.\n{random.choice(frases_agradecimiento)}", 
+                                    text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*. Aquí tienes el enlace: {url}\nGracias por tu paciencia! 😊", 
                                     parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-                elif accion == "denegado":
-                    safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
-                                    text=f"❌ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido rechazada por el *Equipo de EntresHijos*. Contacta a un administrador para más detalles.", 
-                                    parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
-                del_peticion_registrada(ticket)
-                texto = f"✅ *Ticket #{ticket} procesado como {accion_str}* 😊\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
-                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
-                return
+                    del_peticion_registrada(ticket)
+                    del pending_urls[user_id]
+                    keyboard = [[InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    texto = f"✅ *Ticket #{ticket} procesado y notificado con URL* 😊\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+                    safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                    menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+                    return
 
-            if data.endswith("_cancel"):  # Cancelar acción
-                keyboard = [
-                    [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), 
-                     InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                texto = f"❌ *Acción cancelada para Ticket #{ticket}* 😊\nVuelve a seleccionar una opción si deseas continuar."
-                safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
-                menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
-                return
-    except Exception as e:
-        logger.error(f"Error en button_handler: {str(e)}")
+                if data.endswith("subido_url_no") or data.endswith("denegado_confirm") or data.endswith("eliminar_confirm"):  # Procesar sin URL o denegado/eliminar
+                    accion = data.split("_")[2]
+                    accion_str = {"subido": "Aprobado", "denegado": "Rechazado", "eliminar": "Eliminado"}[accion]
+                    if accion != "subido":  # Solo para denegado y eliminar
+                        set_historial_solicitud(ticket, {
+                            "chat_id": info["chat_id"],
+                            "username": info["username"],
+                            "message_text": info["message_text"],
+                            "chat_title": info["chat_title"],
+                            "estado": accion,
+                            "fecha_gestion": datetime.now(SPAIN_TZ),
+                            "admin_username": admin_username
+                        })
+                    keyboard = [
+                        [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), 
+                         InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    canal_info = CANALES_PETICIONES.get(info["chat_id"], {"chat_id": info["chat_id"], "thread_id": info["thread_id"]})
+                    if accion == "subido":
+                        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                                        text=f"✅ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido aprobada por el *Equipo de EntresHijos*.\n{random.choice(frases_agradecimiento)}", 
+                                        parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+                    elif accion == "denegado":
+                        safe_bot_method(bot.send_message, chat_id=canal_info["chat_id"], 
+                                        text=f"❌ {escape_markdown(info['username'], True)}, tu solicitud (Ticket #{ticket}) \"{escape_markdown(info['message_text'])}\" ha sido rechazada por el *Equipo de EntresHijos*. Contacta a un administrador para más detalles.", 
+                                        parse_mode='Markdown', message_thread_id=canal_info["thread_id"])
+                    del_peticion_registrada(ticket)
+                    texto = f"✅ *Ticket #{ticket} procesado como {accion_str}* 😊\n(Finalizado: {datetime.now(SPAIN_TZ).strftime('%H:%M:%S')})"
+                    safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                    menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+                    return
 
-# Configuración de los handlers
-dispatcher.add_handler(CommandHandler("menu", handle_menu))
-dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
-dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
-dispatcher.add_handler(CommandHandler("ping", handle_ping))
-dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
-dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
-dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
-dispatcher.add_handler(CallbackQueryHandler(button_handler))
+                if data.endswith("_cancel"):  # Cancelar acción
+                    keyboard = [
+                        [InlineKeyboardButton("↩️ Pendientes", callback_data="pend_page_1"), 
+                         InlineKeyboardButton("❌ Cerrar", callback_data="menu_close")]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    texto = f"❌ *Acción cancelada para Ticket #{ticket}* 😊\nVuelve a seleccionar una opción si deseas continuar."
+                    safe_bot_method(query.edit_message_text, text=texto, reply_markup=reply_markup, parse_mode='Markdown')
+                    menu_activos[(chat_id, query.message.message_id)] = datetime.now(SPAIN_TZ)
+                    return
+                except Exception as e:
+                logger.error(f"Error en button_handler: {str(e)}")
 
-# Rutas de Flask para el webhook
-@app.route('/')
-def index():
-    return "Bot de Entreshijos está funcionando!", 200
+                # Configuración de los handlers
+                dispatcher.add_handler(CommandHandler("menu", handle_menu))
+                dispatcher.add_handler(CommandHandler("sumar", handle_sumar_command))
+                dispatcher.add_handler(CommandHandler("restar", handle_restar_command))
+                dispatcher.add_handler(CommandHandler("ping", handle_ping))
+                dispatcher.add_handler(CommandHandler("ayuda", handle_ayuda))
+                dispatcher.add_handler(CommandHandler("graficas", handle_graficas))
+                dispatcher.add_handler(MessageHandler(Filters.text | Filters.photo | Filters.document | Filters.video, handle_message))
+                dispatcher.add_handler(CallbackQueryHandler(button_handler))
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = telegram.Update.de_json(request.get_json(force=True), bot)
-        if update:
-            dispatcher.process_update(update)
-            logger.debug("Actualización procesada correctamente")
-            return 'OK', 200
-        else:
-            logger.warning("No se recibió una actualización válida")
-            return 'No update', 400
-    except Exception as e:
-        logger.error(f"Error en el webhook: {str(e)}")
-        return 'Error', 500
+                # Rutas de Flask para el webhook
+                @app.route('/')
+                def index():
+                return "Bot de Entreshijos está funcionando!", 200
 
-# Inicialización del programa
-if __name__ == '__main__':
-    logger.info("Iniciando el bot...")
-    init_db()
-    threading.Thread(target=check_menu_timeout, daemon=True).start()
-    threading.Thread(target=auto_clean_cache, daemon=True).start()
-    port = int(os.getenv('PORT', 5000))
-    result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
-    if result:
-        logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
-    else:
-        logger.error("Fallo al configurar el webhook")
-        raise Exception("No se pudo configurar el webhook")
-    app.run(host='0.0.0.0', port=port, debug=False)
+                @app.route('/webhook', methods=['POST'])
+                def webhook():
+                try:
+                update = telegram.Update.de_json(request.get_json(force=True), bot)
+                if update:
+                dispatcher.process_update(update)
+                logger.debug("Actualización procesada correctamente")
+                return 'OK', 200
+                else:
+                logger.warning("No se recibió una actualización válida")
+                return 'No update', 400
+                except Exception as e:
+                logger.error(f"Error en el webhook: {str(e)}")
+                return 'Error', 500
+
+                # Inicialización del programa
+                if __name__ == '__main__':
+                logger.info("Iniciando el bot...")
+                init_db()
+                threading.Thread(target=check_menu_timeout, daemon=True).start()
+                threading.Thread(target=auto_clean_cache, daemon=True).start()
+                port = int(os.getenv('PORT', 5000))
+                result = safe_bot_method(bot.set_webhook, url=WEBHOOK_URL)
+                if result:
+                logger.info(f"Webhook configurado exitosamente en {WEBHOOK_URL}")
+                else:
+                logger.error("Fallo al configurar el webhook")
+                raise Exception("No se pudo configurar el webhook")
+                app.run(host='0.0.0.0', port=port, debug=False)
